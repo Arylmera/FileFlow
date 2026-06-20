@@ -567,18 +567,31 @@ function SettingsView({
           ))}
         </select>
       </label>
-      <button
-        onClick={async () => {
-          try {
-            const { appConfigDir } = await import("@tauri-apps/api/path");
-            await api.revealInFinder(await appConfigDir());
-          } catch (e) {
-            alert(String(e));
-          }
-        }}
-      >
-        Open config folder
-      </button>
+      <div className="row">
+        <button
+          onClick={async () => {
+            try {
+              const { appConfigDir } = await import("@tauri-apps/api/path");
+              await api.revealInFinder(await appConfigDir());
+            } catch (e) {
+              alert(String(e));
+            }
+          }}
+        >
+          Open config folder
+        </button>
+        <button
+          onClick={async () => {
+            try {
+              await api.revealInFinder(await api.logPath());
+            } catch (e) {
+              alert(String(e));
+            }
+          }}
+        >
+          Open log file
+        </button>
+      </div>
     </section>
   );
 }

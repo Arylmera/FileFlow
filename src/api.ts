@@ -126,3 +126,4 @@ export const destWritable = (path: string) => load<boolean>("dest_writable", { p
 export const getPaused = () => load<boolean>("get_paused", {}, false);
 export const setPaused = (paused: boolean) => invoke<void>("set_paused", { paused });
 export const revealInFinder = (path: string) => invoke<void>("reveal_in_finder", { path });
+export const logPath = () => invoke<string>("log_path");

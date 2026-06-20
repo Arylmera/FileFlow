@@ -134,3 +134,9 @@ pub fn reveal_in_finder(path: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn log_path(app: AppHandle) -> Result<String, String> {
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    Ok(dir.join("fileflow.log").to_string_lossy().to_string())
+}
+

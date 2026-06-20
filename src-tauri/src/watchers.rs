@@ -151,6 +151,15 @@ fn handle_volume(app: &AppHandle, volume_root: &Path) {
         std::thread::sleep(Duration::from_secs(1));
     }
     if dates.is_empty() {
+        // Distinguish "empty card" from "macOS blocked us reading the card".
+        if fda_blocked(volume_root) {
+            notify(
+                app,
+                "FileFlow — Full Disk Access needed",
+                "Grant access in System Settings ▸ Privacy & Security ▸ Full Disk Access, then re-insert the card.",
+            );
+            emit_activity(app, "card", "blocked: needs Full Disk Access");
+        }
         return;
     }
 
@@ -258,11 +267,25 @@ pub fn run_photos_flow(app: &AppHandle) {
     }
 }
 
+/// Heuristic: a `PermissionDenied` reading the card root or its DCIM folder means
+/// macOS is withholding Full Disk Access, not that the card is empty.
+fn fda_blocked(volume_root: &Path) -> bool {
+    [volume_root.to_path_buf(), volume_root.join("DCIM")]
+        .iter()
+        .any(|p| {
+            std::fs::read_dir(p)
+                .err()
+                .map(|e| e.kind() == std::io::ErrorKind::PermissionDenied)
+                .unwrap_or(false)
+        })
+}
+
 fn notify(app: &AppHandle, title: &str, body: &str) {
     let _ = app.notification().builder().title(title).body(body).show();
 }
 
 fn emit_activity(app: &AppHandle, flow: &str, message: &str) {
+    tracing::info!(flow, "{message}");
     let entry = ActivityEntry {
         flow: flow.to_string(),
         message: message.to_string(),

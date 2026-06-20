@@ -74,6 +74,27 @@ pub fn run() {
             // App state: load persisted config (missing file → defaults).
             let config_path = app.path().app_config_dir()?.join("config.toml");
             let config = fileflow_core::config::Config::load(&config_path).unwrap_or_default();
+
+            // File logging to the app log dir (single non-rotating file).
+            if let Ok(log_dir) = app.path().app_log_dir() {
+                let _ = std::fs::create_dir_all(&log_dir);
+                let (writer, guard) = tracing_appender::non_blocking(
+                    tracing_appender::rolling::never(&log_dir, "fileflow.log"),
+                );
+                let level = config
+                    .app
+                    .log_level
+                    .parse::<tracing::Level>()
+                    .unwrap_or(tracing::Level::INFO);
+                let _ = tracing_subscriber::fmt()
+                    .with_writer(writer)
+                    .with_ansi(false)
+                    .with_max_level(level)
+                    .try_init();
+                app.manage(std::sync::Mutex::new(guard)); // keep the flush guard alive
+                tracing::info!("FileFlow started");
+            }
+
             app.manage(state::AppState::new(config, config_path));
 
             // File-system watchers: card ingest (/Volumes) + Lightroom export folder.
@@ -99,6 +120,7 @@ pub fn run() {
             commands::get_paused,
             commands::set_paused,
             commands::reveal_in_finder,
+            commands::log_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
