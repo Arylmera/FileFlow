@@ -3,7 +3,7 @@
 //! Each flow runs on a single dedicated worker thread fed by an mpsc channel, which
 //! gives re-entrancy safety for free: one event can't start an overlapping run.
 
-use crate::state::AppState;
+use crate::state::{ActivityEntry, AppState};
 use crate::volume;
 use fileflow_core::config::{CardRule, CleanupPolicy, EjectPolicy};
 use fileflow_core::ingest::{self, DateGroup};
@@ -22,12 +22,6 @@ use tauri_plugin_notification::NotificationExt;
 struct WatcherHandles {
     _volumes: notify::RecommendedWatcher,
     _export: Option<notify::RecommendedWatcher>,
-}
-
-#[derive(Clone, Serialize)]
-struct Activity {
-    flow: String,
-    message: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -263,11 +257,11 @@ fn notify(app: &AppHandle, title: &str, body: &str) {
 }
 
 fn emit_activity(app: &AppHandle, flow: &str, message: &str) {
-    let _ = app.emit(
-        "activity",
-        Activity {
-            flow: flow.to_string(),
-            message: message.to_string(),
-        },
-    );
+    let entry = ActivityEntry {
+        flow: flow.to_string(),
+        message: message.to_string(),
+        ts: chrono::Local::now().format("%H:%M:%S").to_string(),
+    };
+    app.state::<AppState>().push_activity(entry.clone());
+    let _ = app.emit("activity", entry);
 }

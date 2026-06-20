@@ -23,6 +23,13 @@ pub fn mounted_volumes() -> HashSet<PathBuf> {
     out
 }
 
+/// Find a currently-mounted volume whose UUID matches `uuid` (case-insensitive).
+pub fn find_volume_by_uuid(uuid: &str) -> Option<PathBuf> {
+    mounted_volumes()
+        .into_iter()
+        .find(|p| volume_uuid(p).map(|u| u.eq_ignore_ascii_case(uuid)).unwrap_or(false))
+}
+
 /// Resolve the volume UUID for a mount path via `diskutil info -plist`.
 pub fn volume_uuid(path: &Path) -> Option<String> {
     let out = Command::new("diskutil")

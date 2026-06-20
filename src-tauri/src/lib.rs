@@ -1,3 +1,4 @@
+mod commands;
 mod state;
 mod volume;
 mod watchers;
@@ -57,10 +58,7 @@ pub fn run() {
             // App state: load persisted config (missing file → defaults).
             let config_path = app.path().app_config_dir()?.join("config.toml");
             let config = fileflow_core::config::Config::load(&config_path).unwrap_or_default();
-            app.manage(state::AppState {
-                config: std::sync::Mutex::new(config),
-                config_path,
-            });
+            app.manage(state::AppState::new(config, config_path));
 
             // File-system watchers: card ingest (/Volumes) + Lightroom export folder.
             watchers::start(app)?;
@@ -73,6 +71,15 @@ pub fn run() {
                 api.prevent_close();
             }
         })
+        .invoke_handler(tauri::generate_handler![
+            commands::get_config,
+            commands::save_config,
+            commands::list_mounted_cards,
+            commands::prepare_ingest,
+            commands::run_ingest_now,
+            commands::run_photos_import_now,
+            commands::get_activity,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
