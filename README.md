@@ -44,13 +44,14 @@ cargo test -p fileflow-core
 ## Build
 
 ```sh
-npm run tauri build
-# → target/release/bundle/macos/FileFlow.app
+npm run tauri build      # → target/release/bundle/macos/FileFlow.app
+npm run build:dmg        # also build the installer .dmg (GUI session only — see below)
 ```
 
-The `.app` builds headlessly. The **`.dmg`** step drives Finder via AppleScript to
-lay out the disk-image window and only succeeds in an interactive GUI login
-session — build it from a logged-in desktop, or distribute the `.app` directly.
+The default build produces the `.app` only, which works headlessly. The **`.dmg`**
+step drives Finder via AppleScript to lay out the disk-image window and only
+succeeds in an interactive GUI login session — run `npm run build:dmg` from a
+logged-in desktop, or just distribute the `.app`.
 
 ## One-time macOS permissions
 
@@ -66,15 +67,20 @@ session — build it from a logged-in desktop, or distribute the `.app` directly
 
 The default build is **ad-hoc signed**, so its signature changes on every rebuild
 and macOS re-prompts for the permissions above each time. To make grants persist
-across rebuilds, sign with a stable identity (Apple Development or Developer ID):
+across rebuilds, sign with a stable identity (Apple Development or Developer ID) —
+list yours with `security find-identity -v -p codesigning`:
 
 ```sh
 export APPLE_SIGNING_IDENTITY="Apple Development: you@example.com (TEAMID)"
 npm run tauri build
 ```
 
-or set `bundle.macOS.signingIdentity` in `src-tauri/tauri.conf.json`. The bundle
-identifier (`com.guillaumelemer.fileflow`) is fixed, which TCC also keys on.
+(or set `bundle.macOS.signingIdentity` in `src-tauri/tauri.conf.json`). The bundle
+identifier `com.guillaumelemer.fileflow` is fixed, which TCC also keys on. The
+hardened-runtime entitlement needed to control Photos lives in
+[`src-tauri/entitlements.plist`](src-tauri/entitlements.plist)
+(`com.apple.security.automation.apple-events`) and is applied automatically when
+signing; it's inert for ad-hoc dev builds.
 
 ## Files
 
