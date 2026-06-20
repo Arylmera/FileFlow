@@ -80,7 +80,7 @@ export default function App() {
           ))}
         </nav>
         <button className="save" disabled={!dirty} onClick={save}>
-          {dirty ? "Save changes" : "Saved"}
+          {dirty ? "Save changes" : "✓ Saved"}
         </button>
       </header>
 
@@ -169,7 +169,12 @@ function StatusView({
       </p>
 
       <h3>Mounted volumes</h3>
-      {cards.length === 0 && <p className="muted">No volumes detected.</p>}
+      {cards.length === 0 && (
+        <div className="empty">
+          <p>No volumes detected.</p>
+          <p className="hint">Insert an SD card, or add a rule under Cards.</p>
+        </div>
+      )}
       <ul className="list">
         {cards.map((c) => (
           <li key={c.path} className="row spread">
@@ -203,6 +208,14 @@ function NamingForm({
   const [single, setSingle] = useState("");
   const [perDate, setPerDate] = useState<Record<string, string>>({});
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   async function confirm() {
     const names: Record<string, string> =
       mode === "single"
@@ -226,11 +239,12 @@ function NamingForm({
             <input value={single} onChange={(e) => setSingle(e.target.value)} autoFocus />
           </label>
         ) : (
-          card.dates.map((d) => (
+          card.dates.map((d, i) => (
             <label key={d.date} className="field">
               {d.date} · {d.file_count} files
               <input
                 value={perDate[d.date] ?? ""}
+                autoFocus={i === 0}
                 onChange={(e) =>
                   setPerDate((p) => ({ ...p, [d.date]: e.target.value }))
                 }
@@ -268,7 +282,12 @@ function CardsView({
         <h2>Cards</h2>
         <button onClick={addCard}>+ Add card</button>
       </div>
-      {config.card.length === 0 && <p className="muted">No card rules yet.</p>}
+      {config.card.length === 0 && (
+        <div className="empty">
+          <p>No card rules yet.</p>
+          <p className="hint">Add a rule so a card auto-imports the moment it's inserted.</p>
+        </div>
+      )}
       {config.card.map((card, i) => (
         <div key={i} className="card-edit">
           <div className="row spread">
@@ -422,8 +441,13 @@ function LightroomView({
     return (
       <section>
         <h2>Lightroom → Photos</h2>
-        <p className="muted">Not configured.</p>
-        <button onClick={() => patch({ lightroom: api.newLightroom() })}>Enable</button>
+        <div className="empty">
+          <p>Not configured.</p>
+          <p className="hint">Watch an export folder and import new files into Apple Photos.</p>
+        </div>
+        <button className="primary" onClick={() => patch({ lightroom: api.newLightroom() })}>
+          Enable
+        </button>
       </section>
     );
   }
@@ -510,7 +534,12 @@ function ActivityView({ activity }: { activity: ActivityEntry[] }) {
   return (
     <section>
       <h2>Activity</h2>
-      {activity.length === 0 && <p className="muted">Nothing yet.</p>}
+      {activity.length === 0 && (
+        <div className="empty">
+          <p>Nothing yet.</p>
+          <p className="hint">Card imports and Lightroom syncs will show up here.</p>
+        </div>
+      )}
       <ul className="log">
         {activity.map((a, i) => (
           <li key={i}>
