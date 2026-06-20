@@ -2,7 +2,8 @@
 
 use crate::config::AfterImport;
 use crate::util::{ext_matches, is_hidden};
-use crate::{Error, Result};
+use crate::{layout, Error, Result};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -37,34 +38,70 @@ fn escape(s: &str) -> String {
 ///
 /// `skip_duplicates` maps to Photos' `skip check duplicates` flag: `true` skips files
 /// already in the library; `false` imports everything.
-pub fn build_import_script(files: &[PathBuf], album: &str, skip_duplicates: bool) -> String {
-    let album = escape(album);
+/// Build the AppleScript. `album: None` imports into the library only (no album);
+/// `Some(name)` ensures that album exists and imports into it.
+pub fn build_import_script(files: &[PathBuf], album: Option<&str>, skip_duplicates: bool) -> String {
     let file_list = files
         .iter()
         .map(|p| format!("POSIX file \"{}\"", escape(&p.to_string_lossy())))
         .collect::<Vec<_>>()
         .join(", ");
-    format!(
-        r#"tell application "Photos"
+    match album {
+        Some(album) => {
+            let album = escape(album);
+            format!(
+                r#"tell application "Photos"
   if not (exists album "{album}") then
     make new album named "{album}"
   end if
   set theAlbum to album "{album}"
   import {{{file_list}}} into theAlbum skip check duplicates {skip}
 end tell"#,
-        album = album,
-        file_list = file_list,
-        skip = skip_duplicates,
-    )
+                album = album,
+                file_list = file_list,
+                skip = skip_duplicates,
+            )
+        }
+        None => format!(
+            r#"tell application "Photos"
+  import {{{file_list}}} skip check duplicates {skip}
+end tell"#,
+            file_list = file_list,
+            skip = skip_duplicates,
+        ),
+    }
 }
 
-/// Import `files` into the named Photos album (created if missing).
-pub fn import_to_photos(files: &[PathBuf], album: &str, skip_duplicates: bool) -> Result<PhotosReport> {
-    if files.is_empty() {
-        return Ok(PhotosReport { imported: 0, album: album.to_string() });
+/// Where imported files should land in Photos.
+pub enum AlbumTarget {
+    /// The library only — no album.
+    Library,
+    /// One fixed album.
+    Fixed(String),
+    /// Album name(s) rendered from a date template, grouped by each file's capture date.
+    Template(String),
+}
+
+/// Group files by the album name a date template renders for each file's mtime.
+/// Mirrors the card folder rules ({year}/{date}); {name} renders empty here.
+pub fn album_groups(files: &[PathBuf], template: &str) -> BTreeMap<String, Vec<PathBuf>> {
+    let mut groups: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
+    for f in files {
+        let name = match std::fs::metadata(f).and_then(|m| m.modified()) {
+            Ok(mtime) => {
+                let (year, date) = layout::date_parts(mtime);
+                layout::render(template, &year, &date, "")
+            }
+            Err(_) => template.to_string(),
+        };
+        let name = if name.is_empty() { "Imported".to_string() } else { name };
+        groups.entry(name).or_default().push(f.clone());
     }
-    let script = build_import_script(files, album, skip_duplicates);
-    let out = Command::new("osascript").arg("-e").arg(&script).output()?;
+    groups
+}
+
+fn run_osascript(script: &str) -> Result<()> {
+    let out = Command::new("osascript").arg("-e").arg(script).output()?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         if stderr.contains("-1743") || stderr.to_lowercase().contains("not authorized") {
@@ -72,7 +109,37 @@ pub fn import_to_photos(files: &[PathBuf], album: &str, skip_duplicates: bool) -
         }
         return Err(Error::Osascript(stderr.trim().to_string()));
     }
-    Ok(PhotosReport { imported: files.len(), album: album.to_string() })
+    Ok(())
+}
+
+/// Import `files` into Photos per `target`, creating albums as needed.
+pub fn import_to_photos(
+    files: &[PathBuf],
+    target: &AlbumTarget,
+    skip_duplicates: bool,
+) -> Result<PhotosReport> {
+    if files.is_empty() {
+        return Ok(PhotosReport { imported: 0, album: String::new() });
+    }
+    let album = match target {
+        AlbumTarget::Library => {
+            run_osascript(&build_import_script(files, None, skip_duplicates))?;
+            "library".to_string()
+        }
+        AlbumTarget::Fixed(name) => {
+            run_osascript(&build_import_script(files, Some(name), skip_duplicates))?;
+            name.clone()
+        }
+        AlbumTarget::Template(template) => {
+            let groups = album_groups(files, template);
+            let names: Vec<String> = groups.keys().cloned().collect();
+            for (name, group) in &groups {
+                run_osascript(&build_import_script(group, Some(name), skip_duplicates))?;
+            }
+            format!("{} album(s): {}", names.len(), names.join(", "))
+        }
+    };
+    Ok(PhotosReport { imported: files.len(), album })
 }
 
 /// Move a file, falling back to copy+remove across filesystems.

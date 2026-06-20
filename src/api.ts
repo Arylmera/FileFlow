@@ -5,6 +5,7 @@ export type NameMode = "per_date" | "single";
 export type CleanupPolicy = "ask" | "always" | "never";
 export type EjectPolicy = "never" | "ask" | "always";
 export type AfterImport = "archive" | "delete" | "leave";
+export type AlbumMode = "library" | "fixed" | "template";
 
 export interface CardRule {
   uuid: string;
@@ -21,6 +22,7 @@ export interface CardRule {
 
 export interface LightroomRule {
   watch_folder: string;
+  album_mode: AlbumMode;
   photos_album: string;
   skip_duplicates: boolean;
   after_import: AfterImport;
@@ -96,6 +98,7 @@ export function newCard(): CardRule {
 export function newLightroom(): LightroomRule {
   return {
     watch_folder: "",
+    album_mode: "fixed",
     photos_album: "Lightroom",
     skip_duplicates: true,
     after_import: "archive",

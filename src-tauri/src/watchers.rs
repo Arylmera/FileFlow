@@ -5,7 +5,7 @@
 
 use crate::state::{ActivityEntry, AppState};
 use crate::volume;
-use fileflow_core::config::{CardRule, CleanupPolicy, EjectPolicy};
+use fileflow_core::config::{AlbumMode, CardRule, CleanupPolicy, EjectPolicy};
 use fileflow_core::ingest::{self, DateGroup};
 use fileflow_core::photos;
 use notify::{RecursiveMode, Watcher};
@@ -242,9 +242,14 @@ pub fn run_photos_flow(app: &AppHandle) {
     if files.is_empty() {
         return;
     }
-    match photos::import_to_photos(&files, &lr.photos_album, lr.skip_duplicates) {
+    let target = match lr.album_mode {
+        AlbumMode::Library => photos::AlbumTarget::Library,
+        AlbumMode::Fixed => photos::AlbumTarget::Fixed(lr.photos_album.clone()),
+        AlbumMode::Template => photos::AlbumTarget::Template(lr.photos_album.clone()),
+    };
+    match photos::import_to_photos(&files, &target, lr.skip_duplicates) {
         Ok(rep) => {
-            let msg = format!("imported {} file(s) → album \"{}\"", rep.imported, rep.album);
+            let msg = format!("imported {} file(s) → {}", rep.imported, rep.album);
             notify(app, "FileFlow — Photos", &msg);
             emit_activity(app, "photos", &msg);
             let archive = ingest::expand(&lr.archive_folder);

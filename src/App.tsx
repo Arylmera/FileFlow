@@ -6,6 +6,7 @@ import * as api from "./api";
 import type {
   ActivityEntry,
   AfterImport,
+  AlbumMode,
   CardReady,
   CardRule,
   CleanupPolicy,
@@ -18,6 +19,15 @@ import type {
 import "./App.css";
 
 type Tab = "status" | "cards" | "lightroom" | "activity" | "settings";
+
+const TABS: Tab[] = ["status", "cards", "lightroom", "activity", "settings"];
+const TAB_LABELS: Record<Tab, string> = {
+  status: "Status",
+  cards: "Cards",
+  lightroom: "Import to Photos",
+  activity: "Activity",
+  settings: "Settings",
+};
 
 const csvToList = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
 const listToCsv = (l: string[]) => l.join(", ");
@@ -42,6 +52,19 @@ function layoutExample(template: string): string {
     .filter(Boolean)
     .join("/");
   return `${folder}/DSC0001.ARW`;
+}
+
+/** A worked example of the album name a date template produces. */
+function albumExample(template: string): string {
+  const name = template
+    .replace(/\{year\}/g, "2026")
+    .replace(/\{date\}/g, "2026-06-20")
+    .replace(/\{name\}/g, "")
+    .split("/")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join("/");
+  return name || "Imported";
 }
 
 /** Labelled field with an example placeholder and a one-line "how to fill it" hint. */
@@ -112,9 +135,9 @@ export default function App() {
       <header className="topbar">
         <strong>FileFlow</strong>
         <nav>
-          {(["status", "cards", "lightroom", "activity", "settings"] as Tab[]).map((t) => (
+          {TABS.map((t) => (
             <button key={t} className={tab === t ? "tab active" : "tab"} onClick={() => setTab(t)}>
-              {t}
+              {TAB_LABELS[t]}
             </button>
           ))}
         </nav>
@@ -543,7 +566,7 @@ function LightroomView({ config, patch }: { config: Config; patch: (p: Partial<C
   if (!lr) {
     return (
       <section>
-        <h2>Lightroom → Photos</h2>
+        <h2>Import to Photos</h2>
         <div className="empty">
           <p>Not configured.</p>
           <p className="hint">Watch an export folder and import new files into Apple Photos.</p>
@@ -559,7 +582,7 @@ function LightroomView({ config, patch }: { config: Config; patch: (p: Partial<C
     <section>
       <header className="view-head">
         <div>
-          <h2>Lightroom → Photos</h2>
+          <h2>Import to Photos</h2>
           <p className="subtitle">New files in the watched folder are imported into Apple Photos.</p>
         </div>
         <button className="danger" onClick={() => patch({ lightroom: null })}>
@@ -598,13 +621,42 @@ function LightroomView({ config, patch }: { config: Config; patch: (p: Partial<C
       </Group>
 
       <Group title="Into Photos">
-        <Field label="Album" help="The Photos album to import into. Created if it doesn't exist.">
-          <input
-            placeholder="Lightroom"
-            value={lr.photos_album}
-            onChange={(e) => update({ photos_album: e.target.value })}
-          />
+        <Field label="Add to album" help="Where imported photos land in your Photos library.">
+          <select
+            value={lr.album_mode}
+            onChange={(e) => update({ album_mode: e.target.value as AlbumMode })}
+          >
+            <option value="library">Library only — no album</option>
+            <option value="fixed">A specific album</option>
+            <option value="template">An album named by date</option>
+          </select>
         </Field>
+        {lr.album_mode === "fixed" && (
+          <Field label="Album name" help="Created if it doesn't already exist.">
+            <input
+              placeholder="Lightroom"
+              value={lr.photos_album}
+              onChange={(e) => update({ photos_album: e.target.value })}
+            />
+          </Field>
+        )}
+        {lr.album_mode === "template" && (
+          <>
+            <Field
+              label="Album name template"
+              help="Files are grouped into albums by capture date — same tokens as a card's folder structure: {year}, {date}."
+            >
+              <input
+                placeholder="{date}"
+                value={lr.photos_album}
+                onChange={(e) => update({ photos_album: e.target.value })}
+              />
+            </Field>
+            <p className="preview">
+              Example album: <code>{albumExample(lr.photos_album)}</code>
+            </p>
+          </>
+        )}
         <label className="check">
           <input
             type="checkbox"

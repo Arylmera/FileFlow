@@ -2,7 +2,7 @@ use fileflow_core::config::{AfterImport, CardRule, CleanupPolicy, EjectPolicy, N
 use fileflow_core::ingest::{
     cleanup, plan_ingest, run_ingest, scan_dates, scan_files, FailedCopy, IngestReport,
 };
-use fileflow_core::photos::{after_import, build_import_script};
+use fileflow_core::photos::{after_import, album_groups, build_import_script};
 use fileflow_core::{config::Config, layout};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -136,13 +136,41 @@ fn cleanup_blocked_leaves_card_untouched() {
 #[test]
 fn photos_script_sets_skip_flag_and_escapes() {
     let files = vec![PathBuf::from("/a/b c.jpg")];
-    let yes = build_import_script(&files, "My \"Album\"", true);
+    let yes = build_import_script(&files, Some("My \"Album\""), true);
     assert!(yes.contains("skip check duplicates true"));
     assert!(yes.contains(r#"album "My \"Album\"""#), "album name escaped");
     assert!(yes.contains(r#"POSIX file "/a/b c.jpg""#));
 
-    let no = build_import_script(&files, "Lightroom", false);
+    let no = build_import_script(&files, Some("Lightroom"), false);
     assert!(no.contains("skip check duplicates false"));
+}
+
+#[test]
+fn photos_library_script_has_no_album() {
+    let files = vec![PathBuf::from("/a/b.jpg")];
+    let s = build_import_script(&files, None, true);
+    assert!(s.contains("import {"));
+    assert!(s.contains("skip check duplicates true"));
+    assert!(!s.contains("into theAlbum"), "library import must not target an album");
+    assert!(!s.contains("make new album"));
+}
+
+#[test]
+fn album_groups_split_by_date_template() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = dir.path().join("a.jpg");
+    let b = dir.path().join("b.jpg");
+    let c = dir.path().join("c.jpg");
+    write_file(&a, b"x", DAY_A);
+    write_file(&b, b"x", DAY_A);
+    write_file(&c, b"x", DAY_B);
+
+    let by_date = album_groups(&[a.clone(), b.clone(), c.clone()], "{date}");
+    assert_eq!(by_date.len(), 2, "two distinct capture dates → two albums");
+    assert_eq!(by_date.values().map(|v| v.len()).sum::<usize>(), 3);
+
+    let by_year = album_groups(&[a, b, c], "{year}");
+    assert_eq!(by_year.len(), 1, "same year → one album");
 }
 
 #[test]

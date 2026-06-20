@@ -69,6 +69,9 @@ pub enum EjectPolicy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LightroomRule {
     pub watch_folder: String,
+    #[serde(default)]
+    pub album_mode: AlbumMode,
+    /// Fixed album name (`Fixed`) or a date template (`Template`); ignored for `Library`.
     #[serde(default = "default_album")]
     pub photos_album: String,
     #[serde(default = "default_true")]
@@ -79,6 +82,19 @@ pub struct LightroomRule {
     pub archive_folder: String,
     #[serde(default)]
     pub extensions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AlbumMode {
+    /// Import into the Photos library only — no album.
+    Library,
+    /// One fixed album, named by `photos_album`.
+    #[default]
+    Fixed,
+    /// Album(s) named from `photos_album` as a date template, grouped by each
+    /// file's capture date — the same token rules as a card's folder layout.
+    Template,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
