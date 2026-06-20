@@ -17,6 +17,9 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
+tauri-plugin-notification = "2"
 fileflow-core = { path = "../core" }
+notify = "6"
+plist = "1"
 serde.workspace = true
 serde_json.workspace = true

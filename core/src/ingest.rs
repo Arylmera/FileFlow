@@ -5,6 +5,7 @@
 //! all-or-nothing guarantee holds even if a caller forgets to.
 
 use crate::config::{CardRule, EjectPolicy};
+use crate::util::{ext_matches, is_hidden};
 use crate::layout;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -83,23 +84,6 @@ pub fn resolve_dest(rule: &CardRule) -> Result<PathBuf> {
     Ok(dest)
 }
 
-fn ext_ok(rule: &CardRule, p: &Path) -> bool {
-    if rule.extensions.is_empty() {
-        return true;
-    }
-    match p.extension().and_then(|e| e.to_str()) {
-        Some(ext) => rule.extensions.iter().any(|w| w.eq_ignore_ascii_case(ext)),
-        None => false,
-    }
-}
-
-fn is_hidden(p: &Path) -> bool {
-    p.file_name()
-        .and_then(|n| n.to_str())
-        .map(|n| n.starts_with('.'))
-        .unwrap_or(false)
-}
-
 /// Enumerate matching files under the rule's source folders (globs supported).
 pub fn scan_files(rule: &CardRule, volume_root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
@@ -111,11 +95,11 @@ pub fn scan_files(rule: &CardRule, volume_root: &Path) -> Vec<PathBuf> {
             if entry.is_dir() {
                 for f in WalkDir::new(&entry).into_iter().filter_map(|e| e.ok()) {
                     let p = f.path();
-                    if f.file_type().is_file() && !is_hidden(p) && ext_ok(rule, p) {
+                    if f.file_type().is_file() && !is_hidden(p) && ext_matches(p, &rule.extensions) {
                         out.push(p.to_path_buf());
                     }
                 }
-            } else if entry.is_file() && !is_hidden(&entry) && ext_ok(rule, &entry) {
+            } else if entry.is_file() && !is_hidden(&entry) && ext_matches(&entry, &rule.extensions) {
                 out.push(entry);
             }
         }

@@ -10,5 +10,6 @@ pub mod error;
 pub mod ingest;
 pub mod layout;
 pub mod photos;
+pub mod util;
 
 pub use error::{Error, Result};

@@ -1,9 +1,26 @@
 //! Apple Photos import via `osascript`. (PhotoKit Swift sidecar is a future upgrade, §14.)
 
 use crate::config::AfterImport;
+use crate::util::{ext_matches, is_hidden};
 use crate::{Error, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// List top-level files in an export folder that match `extensions` (non-recursive).
+/// Subdirectories (e.g. an `_imported` archive) are skipped by design.
+pub fn scan_folder(folder: &Path, extensions: &[String]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(folder) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_file() && !is_hidden(&p) && ext_matches(&p, extensions) {
+                out.push(p);
+            }
+        }
+    }
+    out.sort();
+    out
+}
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PhotosReport {

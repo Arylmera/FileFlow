@@ -1,3 +1,7 @@
+mod state;
+mod volume;
+mod watchers;
+
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -22,6 +26,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "Open FileFlow", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -48,6 +53,17 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // App state: load persisted config (missing file → defaults).
+            let config_path = app.path().app_config_dir()?.join("config.toml");
+            let config = fileflow_core::config::Config::load(&config_path).unwrap_or_default();
+            app.manage(state::AppState {
+                config: std::sync::Mutex::new(config),
+                config_path,
+            });
+
+            // File-system watchers: card ingest (/Volumes) + Lightroom export folder.
+            watchers::start(app)?;
             Ok(())
         })
         // Stay resident in the tray: hide the window on close instead of quitting.
