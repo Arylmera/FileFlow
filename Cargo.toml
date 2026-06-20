@@ -1,0 +1,18 @@
+[workspace]
+members = ["core", "src-tauri"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+
+# Shared deps so core and the Tauri shell pin the same versions.
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "1"
+walkdir = "2"
+glob = "0.3"
+chrono = "0.4"
+filetime = "0.2"
