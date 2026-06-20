@@ -222,8 +222,32 @@ button.danger:hover:not(:disabled) {
   flex-direction: column;
   gap: var(--s1);
   margin: var(--s3) 0;
+}
+
+.field .lbl {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
   font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* "How to fill this in" hint under a field. */
+.field .help,
+.help {
+  font-size: 11px;
+  line-height: 1.45;
   color: var(--muted);
+}
+
+.check-help {
+  margin: calc(var(--s1) * -1) 0 var(--s3) 26px;
+}
+
+::placeholder {
+  color: var(--muted);
+  opacity: 0.7;
 }
 
 .field input,
@@ -305,9 +329,83 @@ button.danger:hover:not(:disabled) {
 .card-edit {
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  padding: var(--s3);
+  padding: var(--s4);
   margin-bottom: var(--s4);
   background: var(--panel);
+}
+
+.card-head {
+  align-items: flex-start;
+}
+
+.card-sub {
+  font-size: 12px;
+  margin-top: 2px;
+  word-break: break-all;
+}
+
+/* View header: title + one-line description, action on the right. */
+.view-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--s4);
+  margin-bottom: var(--s4);
+}
+
+.view-head h2 {
+  margin: 0;
+}
+
+.subtitle {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 64ch;
+}
+
+/* Field groups inside a card editor, separated by a hairline. */
+.group {
+  margin-top: var(--s4);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--border);
+}
+
+.group:first-of-type {
+  margin-top: var(--s3);
+  padding-top: 0;
+  border-top: none;
+}
+
+.group-title {
+  margin: 0 0 var(--s1);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s4);
+  align-items: start;
+}
+
+/* Worked example under the folder-structure field. */
+.preview {
+  margin: calc(var(--s1) * -1) 0 var(--s3);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.preview code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text);
+  background: var(--hover);
+  padding: 1px 6px;
+  border-radius: 4px;
 }
 
 .badge {

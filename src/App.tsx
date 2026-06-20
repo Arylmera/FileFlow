@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
@@ -19,8 +19,7 @@ import "./App.css";
 
 type Tab = "status" | "cards" | "lightroom" | "activity" | "settings";
 
-const csvToList = (s: string) =>
-  s.split(",").map((x) => x.trim()).filter(Boolean);
+const csvToList = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
 const listToCsv = (l: string[]) => l.join(", ");
 
 async function pickFolder(): Promise<string | null> {
@@ -30,6 +29,52 @@ async function pickFolder(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** A worked example of the folder a layout template produces. */
+function layoutExample(template: string): string {
+  const folder = template
+    .replace(/\{year\}/g, "2026")
+    .replace(/\{date\}/g, "2026-06-20")
+    .replace(/\{name\}/g, "Holiday")
+    .split("/")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join("/");
+  return `${folder}/DSC0001.ARW`;
+}
+
+/** Labelled field with an example placeholder and a one-line "how to fill it" hint. */
+function Field({
+  label,
+  help,
+  badge,
+  children,
+}: {
+  label: string;
+  help?: string;
+  badge?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <label className="field">
+      <span className="lbl">
+        {label}
+        {badge != null && <> {badge}</>}
+      </span>
+      {children}
+      {help != null && <span className="help">{help}</span>}
+    </label>
+  );
+}
+
+function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="group">
+      <div className="group-title">{title}</div>
+      {children}
+    </div>
+  );
 }
 
 export default function App() {
@@ -44,9 +89,7 @@ export default function App() {
     api.getActivity(100).then(setActivity);
 
     const unlisten = [
-      listen<ActivityEntry>("activity", (e) =>
-        setActivity((a) => [e.payload, ...a].slice(0, 200)),
-      ),
+      listen<ActivityEntry>("activity", (e) => setActivity((a) => [e.payload, ...a].slice(0, 200))),
       listen<CardReady>("card-ready", (e) => setNaming(e.payload)),
     ];
     return () => {
@@ -70,11 +113,7 @@ export default function App() {
         <strong>FileFlow</strong>
         <nav>
           {(["status", "cards", "lightroom", "activity", "settings"] as Tab[]).map((t) => (
-            <button
-              key={t}
-              className={tab === t ? "tab active" : "tab"}
-              onClick={() => setTab(t)}
-            >
+            <button key={t} className={tab === t ? "tab active" : "tab"} onClick={() => setTab(t)}>
               {t}
             </button>
           ))}
@@ -101,7 +140,10 @@ export default function App() {
       {naming && (
         <NamingForm
           card={naming}
-          mode={config.card.find((c) => c.uuid.toLowerCase() === naming.uuid.toLowerCase())?.name_mode ?? "per_date"}
+          mode={
+            config.card.find((c) => c.uuid.toLowerCase() === naming.uuid.toLowerCase())?.name_mode ??
+            "per_date"
+          }
           onClose={() => setNaming(null)}
         />
       )}
@@ -150,10 +192,15 @@ function StatusView({
 
   return (
     <section>
-      <div className="row spread">
-        <h2>Status</h2>
+      <header className="view-head">
         <div>
-          <button onClick={refresh}>Refresh</button>{" "}
+          <h2>Status</h2>
+          <p className="subtitle">
+            Watchers run in the background. Insert a card or drop a Lightroom export to start an import.
+          </p>
+        </div>
+        <div className="row">
+          <button onClick={refresh}>Refresh</button>
           <button
             onClick={async () => {
               await api.setPaused(!paused);
@@ -163,10 +210,9 @@ function StatusView({
             {paused ? "Resume watchers" : "Pause watchers"}
           </button>
         </div>
-      </div>
-      <p className={paused ? "badge warn" : "badge ok"}>
-        Watchers {paused ? "paused" : "active"}
-      </p>
+      </header>
+
+      <p className={paused ? "badge warn" : "badge ok"}>Watchers {paused ? "paused" : "active"}</p>
 
       <h3>Mounted volumes</h3>
       {cards.length === 0 && (
@@ -186,9 +232,7 @@ function StatusView({
                 <span className="badge">{c.uuid ?? "no uuid"}</span>
               )}
             </span>
-            {c.matched && c.uuid && (
-              <button onClick={() => importNow(c.uuid!)}>Import now</button>
-            )}
+            {c.matched && c.uuid && <button onClick={() => importNow(c.uuid!)}>Import now</button>}
           </li>
         ))}
       </ul>
@@ -229,33 +273,40 @@ function NamingForm({
     }
   }
 
+  const total = card.dates.reduce((n, d) => n + d.file_count, 0);
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Name this import — {card.label}</h2>
+        <h2>Name this import</h2>
+        <p className="subtitle">
+          {card.label} · {total} files. These names become the destination folders.
+        </p>
         {mode === "single" ? (
-          <label className="field">
-            Name for all {card.dates.reduce((n, d) => n + d.file_count, 0)} files
-            <input value={single} onChange={(e) => setSingle(e.target.value)} autoFocus />
-          </label>
+          <Field label={`Name for all ${total} files`}>
+            <input
+              placeholder="e.g. Holiday"
+              value={single}
+              onChange={(e) => setSingle(e.target.value)}
+              autoFocus
+            />
+          </Field>
         ) : (
           card.dates.map((d, i) => (
-            <label key={d.date} className="field">
-              {d.date} · {d.file_count} files
+            <Field key={d.date} label={`${d.date} · ${d.file_count} files`}>
               <input
+                placeholder="e.g. Holiday"
                 value={perDate[d.date] ?? ""}
                 autoFocus={i === 0}
-                onChange={(e) =>
-                  setPerDate((p) => ({ ...p, [d.date]: e.target.value }))
-                }
+                onChange={(e) => setPerDate((p) => ({ ...p, [d.date]: e.target.value }))}
               />
-            </label>
+            </Field>
           ))
         )}
         <div className="row end">
           <button onClick={onClose}>Cancel</button>
           <button className="primary" onClick={confirm}>
-            Import
+            Import {total} files
           </button>
         </div>
       </div>
@@ -263,123 +314,172 @@ function NamingForm({
   );
 }
 
-function CardsView({
-  config,
-  patch,
-}: {
-  config: Config;
-  patch: (p: Partial<Config>) => void;
-}) {
+function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Config>) => void }) {
   const updateCard = (i: number, p: Partial<CardRule>) =>
     patch({ card: config.card.map((r, j) => (j === i ? { ...r, ...p } : r)) });
-  const removeCard = (i: number) =>
-    patch({ card: config.card.filter((_, j) => j !== i) });
+  const removeCard = (i: number) => patch({ card: config.card.filter((_, j) => j !== i) });
   const addCard = () => patch({ card: [...config.card, api.newCard()] });
 
   return (
     <section>
-      <div className="row spread">
-        <h2>Cards</h2>
+      <header className="view-head">
+        <div>
+          <h2>Cards</h2>
+          <p className="subtitle">
+            Rules that run automatically when a recognised SD card is inserted.
+          </p>
+        </div>
         <button onClick={addCard}>+ Add card</button>
-      </div>
+      </header>
+
       {config.card.length === 0 && (
         <div className="empty">
           <p>No card rules yet.</p>
           <p className="hint">Add a rule so a card auto-imports the moment it's inserted.</p>
         </div>
       )}
+
       {config.card.map((card, i) => (
         <div key={i} className="card-edit">
-          <div className="row spread">
-            <strong>{card.label || "Untitled card"}</strong>
+          <div className="row spread card-head">
+            <div>
+              <strong>{card.label || "Untitled card"}</strong>
+              {card.dest && <div className="card-sub muted">→ {card.dest}</div>}
+            </div>
             <button className="danger" onClick={() => removeCard(i)}>
               Remove
             </button>
           </div>
-          <label className="field">
-            Label
-            <input value={card.label} onChange={(e) => updateCard(i, { label: e.target.value })} />
-          </label>
-          <label className="field">
-            Volume UUID
-            <div className="row">
-              <input value={card.uuid} onChange={(e) => updateCard(i, { uuid: e.target.value })} />
-              <button
-                onClick={async () => {
-                  const mounted = await api.listMountedCards();
-                  const cand = mounted.find((m) => !m.matched && m.uuid);
-                  if (cand?.uuid) updateCard(i, { uuid: cand.uuid });
-                  else alert("Insert an unconfigured card first.");
-                }}
+
+          <Group title="This card">
+            <Field label="Label" help="A name you'll recognise.">
+              <input
+                placeholder="Sony A7 IV"
+                value={card.label}
+                onChange={(e) => updateCard(i, { label: e.target.value })}
+              />
+            </Field>
+            <Field
+              label="Volume ID"
+              help="The card's unique ID. Insert the card and click Detect to fill this in."
+            >
+              <div className="row">
+                <input
+                  placeholder="1A2B-3C4D"
+                  value={card.uuid}
+                  onChange={(e) => updateCard(i, { uuid: e.target.value })}
+                />
+                <button
+                  onClick={async () => {
+                    const mounted = await api.listMountedCards();
+                    const cand = mounted.find((m) => !m.matched && m.uuid);
+                    if (cand?.uuid) updateCard(i, { uuid: cand.uuid });
+                    else alert("Insert an unconfigured card first, then click Detect.");
+                  }}
+                >
+                  Detect
+                </button>
+              </div>
+            </Field>
+          </Group>
+
+          <Group title="What to copy">
+            <Field
+              label="Source folders"
+              help="Folders on the card to copy from, one per line. Use * to match a series — DCIM/1*MSDCF covers 100MSDCF, 101MSDCF, …"
+            >
+              <textarea
+                rows={2}
+                placeholder="DCIM/100MSDCF"
+                value={card.sources.join("\n")}
+                onChange={(e) =>
+                  updateCard(i, {
+                    sources: e.target.value.split("\n").map((x) => x.trim()).filter(Boolean),
+                  })
+                }
+              />
+            </Field>
+            <Field label="File types" help="Comma-separated extensions to copy. Leave blank to copy everything.">
+              <input
+                placeholder="arw, jpg, mp4"
+                value={listToCsv(card.extensions)}
+                onChange={(e) => updateCard(i, { extensions: csvToList(e.target.value) })}
+              />
+            </Field>
+          </Group>
+
+          <Group title="Where photos go">
+            <DestField value={card.dest} onChange={(v) => updateCard(i, { dest: v })} />
+            <Field
+              label="Folder structure"
+              help="Template for the folders created at the destination. Tokens: {year}, {date}, {name}."
+            >
+              <input
+                placeholder="{year}/{date} {name}"
+                value={card.layout}
+                onChange={(e) => updateCard(i, { layout: e.target.value })}
+              />
+            </Field>
+            <p className="preview">
+              Example: <code>{layoutExample(card.layout)}</code>
+            </p>
+          </Group>
+
+          <Group title="When a card is inserted">
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={card.prompt_name}
+                onChange={(e) => updateCard(i, { prompt_name: e.target.checked })}
+              />
+              Ask me for a name before importing
+            </label>
+            <p className="help check-help">
+              Used in the {"{name}"} token. Off = folders are just the date.
+            </p>
+            {card.prompt_name && (
+              <Field
+                label="Naming"
+                help="One name for the whole import, or a separate name for each capture date."
               >
-                Detect
-              </button>
+                <select
+                  value={card.name_mode}
+                  onChange={(e) => updateCard(i, { name_mode: e.target.value as NameMode })}
+                >
+                  <option value="per_date">A name per capture date</option>
+                  <option value="single">One name for everything</option>
+                </select>
+              </Field>
+            )}
+          </Group>
+
+          <Group title="After importing">
+            <div className="cols">
+              <Field
+                label="Clean card"
+                help="Delete files from the card once every file is copied and verified. Permanent — cards have no Trash."
+              >
+                <select
+                  value={card.cleanup}
+                  onChange={(e) => updateCard(i, { cleanup: e.target.value as CleanupPolicy })}
+                >
+                  <option value="ask">Ask first</option>
+                  <option value="always">Always</option>
+                  <option value="never">Never</option>
+                </select>
+              </Field>
+              <Field label="Eject card" help="Unmount the card when the import finishes successfully.">
+                <select
+                  value={card.eject}
+                  onChange={(e) => updateCard(i, { eject: e.target.value as EjectPolicy })}
+                >
+                  <option value="never">Never</option>
+                  <option value="ask">Ask first</option>
+                  <option value="always">Always</option>
+                </select>
+              </Field>
             </div>
-          </label>
-          <label className="field">
-            Source folders (one per line, globs OK)
-            <textarea
-              rows={2}
-              value={card.sources.join("\n")}
-              onChange={(e) =>
-                updateCard(i, { sources: e.target.value.split("\n").map((x) => x.trim()).filter(Boolean) })
-              }
-            />
-          </label>
-          <DestField value={card.dest} onChange={(v) => updateCard(i, { dest: v })} />
-          <label className="field">
-            Layout
-            <input value={card.layout} onChange={(e) => updateCard(i, { layout: e.target.value })} />
-          </label>
-          <label className="field">
-            Extensions (comma-separated, blank = all)
-            <input
-              value={listToCsv(card.extensions)}
-              onChange={(e) => updateCard(i, { extensions: csvToList(e.target.value) })}
-            />
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={card.prompt_name}
-              onChange={(e) => updateCard(i, { prompt_name: e.target.checked })}
-            />
-            Prompt for a name
-          </label>
-          <div className="row gap">
-            <label className="field">
-              Name mode
-              <select
-                value={card.name_mode}
-                onChange={(e) => updateCard(i, { name_mode: e.target.value as NameMode })}
-              >
-                <option value="per_date">per date</option>
-                <option value="single">single</option>
-              </select>
-            </label>
-            <label className="field">
-              Cleanup
-              <select
-                value={card.cleanup}
-                onChange={(e) => updateCard(i, { cleanup: e.target.value as CleanupPolicy })}
-              >
-                <option value="ask">ask</option>
-                <option value="always">always</option>
-                <option value="never">never</option>
-              </select>
-            </label>
-            <label className="field">
-              Eject
-              <select
-                value={card.eject}
-                onChange={(e) => updateCard(i, { eject: e.target.value as EjectPolicy })}
-              >
-                <option value="never">never</option>
-                <option value="ask">ask</option>
-                <option value="always">always</option>
-              </select>
-            </label>
-          </div>
+          </Group>
         </div>
       ))}
     </section>
@@ -400,19 +500,28 @@ function DestField({ value, onChange }: { value: string; onChange: (v: string) =
     };
   }, [value]);
 
+  const badge =
+    value &&
+    (writable === null ? (
+      <span className="badge">checking…</span>
+    ) : writable ? (
+      <span className="badge ok">reachable</span>
+    ) : (
+      <span className="badge warn">unreachable</span>
+    ));
+
   return (
-    <label className="field">
-      Destination{" "}
-      {value &&
-        (writable === null ? (
-          <span className="badge">checking…</span>
-        ) : writable ? (
-          <span className="badge ok">reachable</span>
-        ) : (
-          <span className="badge warn">unreachable</span>
-        ))}
+    <Field
+      label="Destination"
+      badge={badge}
+      help="Where photos are copied — a folder on this Mac, a cloud folder (OneDrive, iCloud…), a network share, or an external drive."
+    >
       <div className="row">
-        <input value={value} onChange={(e) => onChange(e.target.value)} />
+        <input
+          placeholder="~/Pictures/Imports"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
         <button
           onClick={async () => {
             const dir = await pickFolder();
@@ -422,17 +531,11 @@ function DestField({ value, onChange }: { value: string; onChange: (v: string) =
           Choose…
         </button>
       </div>
-    </label>
+    </Field>
   );
 }
 
-function LightroomView({
-  config,
-  patch,
-}: {
-  config: Config;
-  patch: (p: Partial<Config>) => void;
-}) {
+function LightroomView({ config, patch }: { config: Config; patch: (p: Partial<Config>) => void }) {
   const lr = config.lightroom;
   const update = (p: Partial<LightroomRule>) =>
     patch({ lightroom: { ...(lr as LightroomRule), ...p } });
@@ -454,78 +557,95 @@ function LightroomView({
 
   return (
     <section>
-      <div className="row spread">
-        <h2>Lightroom → Photos</h2>
+      <header className="view-head">
+        <div>
+          <h2>Lightroom → Photos</h2>
+          <p className="subtitle">New files in the watched folder are imported into Apple Photos.</p>
+        </div>
         <button className="danger" onClick={() => patch({ lightroom: null })}>
           Disable
         </button>
-      </div>
-      <label className="field">
-        Watch folder
-        <div className="row">
-          <input
-            value={lr.watch_folder}
-            onChange={(e) => update({ watch_folder: e.target.value })}
-          />
-          <button
-            onClick={async () => {
-              const dir = await pickFolder();
-              if (dir) update({ watch_folder: dir });
-            }}
-          >
-            Choose…
-          </button>
-        </div>
-      </label>
-      <label className="field">
-        Photos album
-        <input value={lr.photos_album} onChange={(e) => update({ photos_album: e.target.value })} />
-      </label>
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={lr.skip_duplicates}
-          onChange={(e) => update({ skip_duplicates: e.target.checked })}
-        />
-        Skip files already in the library
-      </label>
-      <label className="field">
-        After import
-        <select
-          value={lr.after_import}
-          onChange={(e) => update({ after_import: e.target.value as AfterImport })}
+      </header>
+
+      <Group title="Source">
+        <Field
+          label="Watch folder"
+          help="FileFlow imports new files dropped here. Point Lightroom's export at this folder."
         >
-          <option value="leave">leave</option>
-          <option value="archive">archive</option>
-          <option value="delete">delete</option>
-        </select>
-      </label>
-      {lr.after_import === "archive" && (
-        <label className="field">
-          Archive folder
           <div className="row">
             <input
-              value={lr.archive_folder}
-              onChange={(e) => update({ archive_folder: e.target.value })}
+              placeholder="~/Pictures/Lightroom Exports"
+              value={lr.watch_folder}
+              onChange={(e) => update({ watch_folder: e.target.value })}
             />
             <button
               onClick={async () => {
                 const dir = await pickFolder();
-                if (dir) update({ archive_folder: dir });
+                if (dir) update({ watch_folder: dir });
               }}
             >
               Choose…
             </button>
           </div>
+        </Field>
+        <Field label="File types" help="Comma-separated extensions to import.">
+          <input
+            placeholder="jpg, jpeg, tiff, heif"
+            value={listToCsv(lr.extensions)}
+            onChange={(e) => update({ extensions: csvToList(e.target.value) })}
+          />
+        </Field>
+      </Group>
+
+      <Group title="Into Photos">
+        <Field label="Album" help="The Photos album to import into. Created if it doesn't exist.">
+          <input
+            placeholder="Lightroom"
+            value={lr.photos_album}
+            onChange={(e) => update({ photos_album: e.target.value })}
+          />
+        </Field>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={lr.skip_duplicates}
+            onChange={(e) => update({ skip_duplicates: e.target.checked })}
+          />
+          Skip files already in my Photos library
         </label>
-      )}
-      <label className="field">
-        Extensions (comma-separated)
-        <input
-          value={listToCsv(lr.extensions)}
-          onChange={(e) => update({ extensions: csvToList(e.target.value) })}
-        />
-      </label>
+      </Group>
+
+      <Group title="After importing">
+        <Field label="Exported files" help="What to do with the files once they're safely in Photos.">
+          <select
+            value={lr.after_import}
+            onChange={(e) => update({ after_import: e.target.value as AfterImport })}
+          >
+            <option value="leave">Leave them in place</option>
+            <option value="archive">Move to an archive folder</option>
+            <option value="delete">Delete them</option>
+          </select>
+        </Field>
+        {lr.after_import === "archive" && (
+          <Field label="Archive folder" help="Where imported files are moved.">
+            <div className="row">
+              <input
+                placeholder="~/Pictures/Lightroom Exports/_imported"
+                value={lr.archive_folder}
+                onChange={(e) => update({ archive_folder: e.target.value })}
+              />
+              <button
+                onClick={async () => {
+                  const dir = await pickFolder();
+                  if (dir) update({ archive_folder: dir });
+                }}
+              >
+                Choose…
+              </button>
+            </div>
+          </Field>
+        )}
+      </Group>
     </section>
   );
 }
@@ -533,7 +653,12 @@ function LightroomView({
 function ActivityView({ activity }: { activity: ActivityEntry[] }) {
   return (
     <section>
-      <h2>Activity</h2>
+      <header className="view-head">
+        <div>
+          <h2>Activity</h2>
+          <p className="subtitle">A running log of imports and any problems.</p>
+        </div>
+      </header>
       {activity.length === 0 && (
         <div className="empty">
           <p>Nothing yet.</p>
@@ -553,13 +678,7 @@ function ActivityView({ activity }: { activity: ActivityEntry[] }) {
   );
 }
 
-function SettingsView({
-  config,
-  patch,
-}: {
-  config: Config;
-  patch: (p: Partial<Config>) => void;
-}) {
+function SettingsView({ config, patch }: { config: Config; patch: (p: Partial<Config>) => void }) {
   const [autostart, setAutostart] = useState<boolean | null>(null);
   useEffect(() => {
     isEnabled().then(setAutostart).catch(() => setAutostart(false));
@@ -567,7 +686,13 @@ function SettingsView({
 
   return (
     <section>
-      <h2>Settings</h2>
+      <header className="view-head">
+        <div>
+          <h2>Settings</h2>
+          <p className="subtitle">App-wide preferences.</p>
+        </div>
+      </header>
+
       <label className="check">
         <input
           type="checkbox"
@@ -583,8 +708,9 @@ function SettingsView({
         />
         Launch at login
       </label>
-      <label className="field">
-        Log level
+      <p className="help check-help">Start FileFlow automatically and keep it in the menu bar.</p>
+
+      <Field label="Log level" help="How much detail is written to the log file. “info” is usually enough.">
         <select
           value={config.app.log_level}
           onChange={(e) => patch({ app: { ...config.app, log_level: e.target.value } })}
@@ -595,7 +721,8 @@ function SettingsView({
             </option>
           ))}
         </select>
-      </label>
+      </Field>
+
       <div className="row">
         <button
           onClick={async () => {
