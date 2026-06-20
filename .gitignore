@@ -15,6 +15,9 @@ dist-ssr
 # Rust workspace build output (lives at repo root with the workspace)
 /target
 
+# Local dev tooling (preview launch config)
+.claude
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

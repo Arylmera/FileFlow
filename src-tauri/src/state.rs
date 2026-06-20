@@ -4,6 +4,7 @@ use fileflow_core::config::Config;
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 const ACTIVITY_CAP: usize = 200;
@@ -19,6 +20,8 @@ pub struct AppState {
     pub config: Mutex<Config>,
     pub config_path: PathBuf,
     pub activity: Mutex<VecDeque<ActivityEntry>>,
+    /// When true, automatic (watcher-initiated) flows are skipped. Manual triggers ignore it.
+    pub paused: AtomicBool,
 }
 
 impl AppState {
@@ -27,7 +30,16 @@ impl AppState {
             config: Mutex::new(config),
             config_path,
             activity: Mutex::new(VecDeque::new()),
+            paused: AtomicBool::new(false),
         }
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed)
+    }
+
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Relaxed);
     }
 
     /// Snapshot the current config (clone) so callers don't hold the lock across work.

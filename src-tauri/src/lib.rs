@@ -4,9 +4,9 @@ mod volume;
 mod watchers;
 
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
 };
 
 fn show_main(app: &tauri::AppHandle) {
@@ -28,10 +28,16 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "Open FileFlow", true, None::<&str>)?;
+            let import_lr =
+                MenuItem::with_id(app, "import_lr", "Import Lightroom now", true, None::<&str>)?;
+            let pause =
+                MenuItem::with_id(app, "toggle_pause", "Pause / Resume watchers", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &quit])?;
+            let sep = PredefinedMenuItem::separator(app)?;
+            let menu = Menu::with_items(app, &[&show, &import_lr, &pause, &sep, &quit])?;
 
             TrayIconBuilder::with_id("main-tray")
                 .icon(app.default_window_icon().unwrap().clone())
@@ -40,6 +46,16 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => show_main(app),
+                    "import_lr" => {
+                        let a = app.clone();
+                        std::thread::spawn(move || watchers::run_photos_flow(&a));
+                    }
+                    "toggle_pause" => {
+                        let st = app.state::<state::AppState>();
+                        let now = !st.is_paused();
+                        st.set_paused(now);
+                        let _ = app.emit("paused-changed", now);
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -79,6 +95,10 @@ pub fn run() {
             commands::run_ingest_now,
             commands::run_photos_import_now,
             commands::get_activity,
+            commands::dest_writable,
+            commands::get_paused,
+            commands::set_paused,
+            commands::reveal_in_finder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

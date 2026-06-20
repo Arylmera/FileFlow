@@ -75,13 +75,26 @@ pub fn expand(path: &str) -> PathBuf {
 /// writing a local stub where a NAS/external mount should be (locked decision §1).
 pub fn resolve_dest(rule: &CardRule) -> Result<PathBuf> {
     let dest = expand(&rule.dest);
-    if !dest.is_dir() {
-        return Err(Error::DestUnavailable(dest));
+    if is_writable_dir(&dest) {
+        Ok(dest)
+    } else {
+        Err(Error::DestUnavailable(dest))
     }
-    let probe = dest.join(".fileflow-write-test");
-    std::fs::write(&probe, b"ok").map_err(|_| Error::DestUnavailable(dest.clone()))?;
-    let _ = std::fs::remove_file(&probe);
-    Ok(dest)
+}
+
+/// True if `dir` exists and a probe file can be written + removed (touch-test).
+pub fn is_writable_dir(dir: &Path) -> bool {
+    if !dir.is_dir() {
+        return false;
+    }
+    let probe = dir.join(".fileflow-write-test");
+    match std::fs::write(&probe, b"ok") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 /// Enumerate matching files under the rule's source folders (globs supported).

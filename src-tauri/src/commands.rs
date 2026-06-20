@@ -104,3 +104,33 @@ pub fn run_photos_import_now(app: AppHandle) {
 pub fn get_activity(state: State<AppState>, limit: usize) -> Vec<ActivityEntry> {
     state.recent_activity(limit)
 }
+
+/// True if `path` (after `~` expansion) is an existing, writable directory.
+/// Drives the Cards form's live "reachable & writable?" indicator.
+#[tauri::command]
+pub fn dest_writable(path: String) -> bool {
+    ingest::is_writable_dir(&ingest::expand(&path))
+}
+
+#[tauri::command]
+pub fn get_paused(state: State<AppState>) -> bool {
+    state.is_paused()
+}
+
+#[tauri::command]
+pub fn set_paused(state: State<AppState>, paused: bool) {
+    state.set_paused(paused);
+}
+
+/// Reveal a path in Finder (`~` expanded). Used by Settings' "Open config".
+#[tauri::command]
+pub fn reveal_in_finder(path: String) -> Result<(), String> {
+    let p = ingest::expand(&path);
+    std::process::Command::new("open")
+        .arg("-R")
+        .arg(&p)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+

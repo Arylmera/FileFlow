@@ -107,11 +107,17 @@ fn export_worker(app: AppHandle, rx: mpsc::Receiver<()>) {
                 Err(RecvTimeoutError::Disconnected) => return,
             }
         }
+        if app.state::<AppState>().is_paused() {
+            continue;
+        }
         run_photos_flow(&app);
     }
 }
 
 fn handle_volume(app: &AppHandle, volume_root: &Path) {
+    if app.state::<AppState>().is_paused() {
+        return;
+    }
     let Some(uuid) = volume::volume_uuid(volume_root) else {
         return;
     };
