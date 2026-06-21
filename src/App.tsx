@@ -970,6 +970,18 @@ function SettingsView({ config, patch }: { config: Config; patch: (p: Partial<Co
       </label>
       <p className="help check-help">Start FileFlow automatically and keep it in the menu bar.</p>
 
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={config.app.keep_running_on_close}
+          onChange={(e) =>
+            patch({ app: { ...config.app, keep_running_on_close: e.target.checked } })
+          }
+        />
+        Keep running in the menu bar when the window is closed
+      </label>
+      <p className="help check-help">When off, closing the window quits FileFlow.</p>
+
       <Field label="Log level" help="How much detail is written to the log file. “info” is usually enough.">
         <select
           value={config.app.log_level}

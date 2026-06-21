@@ -34,6 +34,7 @@ export interface LightroomRule {
 
 export interface AppSettings {
   autostart: boolean;
+  keep_running_on_close: boolean;
   log_level: string;
 }
 
@@ -93,7 +94,7 @@ export const emptyConfig: Config = {
   card: [],
   folder: [],
   lightroom: null,
-  app: { autostart: true, log_level: "info" },
+  app: { autostart: true, keep_running_on_close: true, log_level: "info" },
 };
 
 export function newFolder(): FolderRule {

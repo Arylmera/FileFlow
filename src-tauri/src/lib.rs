@@ -40,7 +40,8 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&show, &import_lr, &pause, &sep, &quit])?;
 
             TrayIconBuilder::with_id("main-tray")
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tauri::include_image!("icons/tray.png"))
+                .icon_as_template(true)
                 .tooltip("FileFlow")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
@@ -101,11 +102,19 @@ pub fn run() {
             watchers::start(app)?;
             Ok(())
         })
-        // Stay resident in the tray: hide the window on close instead of quitting.
+        // On window close: hide to the menu bar (default) or quit, per the setting.
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
-                api.prevent_close();
+                let keep = window
+                    .app_handle()
+                    .state::<state::AppState>()
+                    .snapshot()
+                    .app
+                    .keep_running_on_close;
+                if keep {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![

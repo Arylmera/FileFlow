@@ -132,13 +132,20 @@ pub enum AfterImport {
 pub struct AppSettings {
     #[serde(default = "default_true")]
     pub autostart: bool,
+    /// Hide to the menu bar on window close instead of quitting.
+    #[serde(default = "default_true")]
+    pub keep_running_on_close: bool,
     #[serde(default = "default_log_level")]
     pub log_level: String,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
-        AppSettings { autostart: true, log_level: default_log_level() }
+        AppSettings {
+            autostart: true,
+            keep_running_on_close: true,
+            log_level: default_log_level(),
+        }
     }
 }
 

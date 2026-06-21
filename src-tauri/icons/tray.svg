@@ -1,0 +1,8 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Monochrome menu-bar glyph: a file flowing down into a tray (import). -->
+  <g fill="#000000">
+    <rect x="28" y="9" width="8" height="27" rx="4"/>
+    <path d="M17 29 L32 47 L47 29 Z"/>
+    <rect x="13" y="50" width="38" height="7" rx="3.5"/>
+  </g>
+</svg>
