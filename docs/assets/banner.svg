@@ -1,0 +1,54 @@
+<svg width="1200" height="300" viewBox="0 0 1200 300" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="FileFlow — automatic photo ingest and Lightroom to Photos for macOS">
+  <defs>
+    <linearGradient id="panel" x1="0" y1="0" x2="1200" y2="300" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4C9AFF"/>
+      <stop offset="0.52" stop-color="#3B6FE0"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+    <linearGradient id="i-sky" x1="512" y1="316" x2="512" y2="676" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E8F0FE"/>
+      <stop offset="1" stop-color="#EDE7FB"/>
+    </linearGradient>
+    <linearGradient id="i-badge" x1="700" y1="600" x2="700" y2="804" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3B6FE0"/>
+      <stop offset="1" stop-color="#7C4DF0"/>
+    </linearGradient>
+    <clipPath id="i-frontClip"><rect x="300" y="316" width="424" height="360" rx="54"/></clipPath>
+  </defs>
+
+  <!-- gradient panel: legible behind white text on GitHub light and dark themes -->
+  <rect width="1200" height="300" fill="url(#panel)"/>
+  <!-- faint sheen, top-left -->
+  <rect width="1200" height="150" fill="#ffffff" opacity="0.06"/>
+
+  <!-- brand mark: a photo-card stack flowing into an import badge (from the app icon) -->
+  <g transform="translate(-31 -40) scale(0.36)">
+    <!-- back card: a peeking second photo, for the stack / flow -->
+    <rect x="352" y="280" width="360" height="312" rx="46" fill="#ffffff" opacity="0.32"
+          transform="rotate(-11 512 512)"/>
+    <!-- front photo card -->
+    <rect x="300" y="316" width="424" height="360" rx="54" fill="#ffffff"/>
+    <g clip-path="url(#i-frontClip)">
+      <rect x="300" y="316" width="424" height="360" fill="url(#i-sky)"/>
+      <circle cx="410" cy="428" r="48" fill="#F59E0B"/>
+      <path d="M300 676 L474 466 L596 600 L664 520 L724 596 L724 676 Z" fill="#8B5CF6" opacity="0.5"/>
+      <path d="M300 676 L454 506 L608 676 Z" fill="#3B6FE0"/>
+    </g>
+    <!-- import / flow badge -->
+    <circle cx="700" cy="700" r="106" fill="#ffffff"/>
+    <circle cx="700" cy="700" r="86" fill="url(#i-badge)"/>
+    <g fill="#ffffff">
+      <rect x="684" y="646" width="32" height="74" rx="16"/>
+      <path d="M650 702 L700 760 L750 702 Z"/>
+    </g>
+  </g>
+
+  <!-- wordmark -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+    <text x="300" y="142" font-size="92" font-weight="700" fill="#ffffff" letter-spacing="-2">FileFlow</text>
+    <text x="303" y="196" font-size="31" font-weight="500" fill="#ffffff" opacity="0.92">Automatic photo ingest &amp; Lightroom&#8201;&#8594;&#8201;Photos for macOS</text>
+    <!-- menu-bar pill -->
+    <rect x="303" y="222" width="246" height="38" rx="19" fill="#ffffff" opacity="0.16"/>
+    <text x="324" y="247" font-size="20" font-weight="600" fill="#ffffff">menu-bar app · runs unattended</text>
+  </g>
+</svg>
