@@ -2,19 +2,19 @@
 
 A macOS menu-bar app that automates two photo chores:
 
-1. **Card ingest** — when a recognised SD card is inserted, copy its photos into a
-   per-card destination foldered by capture date, verify every copy, then
-   (optionally) wipe and eject the card.
+1. **Drive ingest** — when a recognised external drive (SD card, USB stick, …) is
+   connected, copy its photos into a per-drive destination foldered by capture date,
+   verify every copy, then (optionally) wipe and eject the drive.
 2. **Lightroom → Photos** — watch a Lightroom export folder and import new files
    into an Apple Photos album.
 
-The destination is per-card: a local folder, a cloud-synced folder (OneDrive,
+The destination is per-drive: a local folder, a cloud-synced folder (OneDrive,
 iCloud Drive, Dropbox, Google Drive), a mounted network share (SMB/NFS, e.g. a
 TrueNAS dataset), or an external drive — anything that resolves to a writable path.
 
 ## Safety model
 
-Copy is **verified** (byte size) and deletion is **all-or-nothing**: the card is
+Copy is **verified** (byte size) and deletion is **all-or-nothing**: the drive is
 wiped only after *every* file in the set has copied and verified. A single failure
 — including the destination going unreachable mid-run — aborts deletion entirely,
 so a partial or interrupted copy can never lose data. Re-runs are idempotent
@@ -55,7 +55,7 @@ logged-in desktop, or just distribute the `.app`.
 
 ## One-time macOS permissions
 
-- **Full Disk Access** — required to read card contents under `/Volumes` and to
+- **Full Disk Access** — required to read drive contents under `/Volumes` and to
   write into protected destinations (e.g. `~/Library/CloudStorage`). Grant under
   *System Settings ▸ Privacy & Security ▸ Full Disk Access*. FileFlow detects the
   blocked case and notifies you.

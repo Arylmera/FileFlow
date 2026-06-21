@@ -141,7 +141,7 @@ fn handle_volume(app: &AppHandle, volume_root: &Path) {
         Ok(d) => d,
         Err(e) => {
             notify(app, "FileFlow — destination unavailable", &e.to_string());
-            emit_activity(app, "card", &format!("{}: {e}", rule.label));
+            emit_activity(app, "drive", &format!("{}: {e}", rule.label));
             return;
         }
     };
@@ -161,9 +161,9 @@ fn handle_volume(app: &AppHandle, volume_root: &Path) {
             notify(
                 app,
                 "FileFlow — Full Disk Access needed",
-                "Grant access in System Settings ▸ Privacy & Security ▸ Full Disk Access, then re-insert the card.",
+                "Grant access in System Settings ▸ Privacy & Security ▸ Full Disk Access, then reconnect the drive.",
             );
-            emit_activity(app, "card", "blocked: needs Full Disk Access");
+            emit_activity(app, "drive", "blocked: needs Full Disk Access");
         }
         return;
     }
@@ -203,7 +203,7 @@ pub fn run_card_ingest(
     let (c, s, f) = (report.copied.len(), report.skipped.len(), report.failed.len());
     let summary = format!("{c} copied, {s} skipped, {f} failed → {}", rule.dest);
     notify(app, &format!("FileFlow — {}", rule.label), &summary);
-    emit_activity(app, "card", &summary);
+    emit_activity(app, "drive", &summary);
 
     if !report.is_clean() {
         // All-or-nothing: any failure aborts both cleanup and eject. Card untouched.
@@ -212,22 +212,22 @@ pub fn run_card_ingest(
 
     match rule.cleanup {
         CleanupPolicy::Always => match ingest::cleanup(&report) {
-            Ok(d) => emit_activity(app, "card", &format!("deleted {} file(s) from card", d.len())),
-            Err(e) => emit_activity(app, "card", &format!("cleanup error: {e}")),
+            Ok(d) => emit_activity(app, "drive", &format!("deleted {} file(s) from drive", d.len())),
+            Err(e) => emit_activity(app, "drive", &format!("cleanup error: {e}")),
         },
         CleanupPolicy::Never => {}
         CleanupPolicy::Ask => {
             // Confirmation dialog is Phase 5; until then keep the card intact and stop
             // before ejecting (the user may still want the card mounted).
             let _ = app.emit("cleanup-pending", &summary);
-            emit_activity(app, "card", "cleanup needs confirmation (card kept intact)");
+            emit_activity(app, "drive", "cleanup needs confirmation (drive kept intact)");
             return;
         }
     }
 
     match rule.eject {
         EjectPolicy::Always => match ingest::eject(volume_root, EjectPolicy::Always) {
-            Ok(_) => emit_activity(app, "card", "card ejected"),
+            Ok(_) => emit_activity(app, "drive", "drive ejected"),
             Err(e) => notify(app, "FileFlow — eject failed", &e.to_string()),
         },
         EjectPolicy::Never => {}

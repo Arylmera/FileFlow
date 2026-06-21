@@ -30,7 +30,7 @@ type NamingReq =
 const TABS: Tab[] = ["status", "cards", "lightroom", "activity", "settings"];
 const TAB_LABELS: Record<Tab, string> = {
   status: "Status",
-  cards: "SD Card",
+  cards: "External Drive",
   lightroom: "Import to Photos",
   activity: "Activity",
   settings: "Settings",
@@ -266,7 +266,7 @@ function StatusView({
         <div>
           <h2>Status</h2>
           <p className="subtitle">
-            Watchers run in the background. Insert a card or drop a Lightroom export to start an import.
+            Watchers run in the background. Connect a drive or drop a Lightroom export to start an import.
           </p>
         </div>
         <div className="row">
@@ -288,7 +288,7 @@ function StatusView({
       {cards.length === 0 && (
         <div className="empty">
           <p>No volumes detected.</p>
-          <p className="hint">Insert an SD card, or add a rule under Cards.</p>
+          <p className="hint">Connect a drive, or add a rule under External Drive.</p>
         </div>
       )}
       <ul className="list">
@@ -396,18 +396,18 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
     <section>
       <header className="view-head">
         <div>
-          <h2>SD Card</h2>
+          <h2>External Drive</h2>
           <p className="subtitle">
-            Rules that run automatically when a recognised SD card is inserted.
+            Rules that run automatically when a recognised drive is connected.
           </p>
         </div>
-        <button onClick={addCard}>+ Add card</button>
+        <button onClick={addCard}>+ Add drive</button>
       </header>
 
       {config.card.length === 0 && (
         <div className="empty">
-          <p>No card rules yet.</p>
-          <p className="hint">Add a rule so a card auto-imports the moment it's inserted.</p>
+          <p>No drive rules yet.</p>
+          <p className="hint">Add a rule so a drive auto-imports the moment it's connected.</p>
         </div>
       )}
 
@@ -415,7 +415,7 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
         <div key={i} className="card-edit">
           <div className="row spread card-head">
             <div>
-              <strong>{card.label || "Untitled card"}</strong>
+              <strong>{card.label || "Untitled drive"}</strong>
               {card.dest && <div className="card-sub muted">→ {card.dest}</div>}
             </div>
             <button className="danger" onClick={() => removeCard(i)}>
@@ -423,7 +423,7 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
             </button>
           </div>
 
-          <Group title="This card">
+          <Group title="This drive">
             <Field label="Label" help="A name you'll recognise.">
               <input
                 placeholder="Sony A7 IV"
@@ -433,7 +433,7 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
             </Field>
             <Field
               label="Volume ID"
-              help="The card's unique ID. Insert the card and click Detect to fill this in."
+              help="The drive's unique ID. Connect the drive and click Detect to fill this in."
             >
               <div className="row">
                 <input
@@ -446,7 +446,7 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
                     const mounted = await api.listMountedCards();
                     const cand = mounted.find((m) => !m.matched && m.uuid);
                     if (cand?.uuid) updateCard(i, { uuid: cand.uuid });
-                    else alert("Insert an unconfigured card first, then click Detect.");
+                    else alert("Connect an unconfigured drive first, then click Detect.");
                   }}
                 >
                   Detect
@@ -458,7 +458,7 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
           <Group title="What to copy">
             <Field
               label="Source folders"
-              help="Folders on the card to copy from, one per line. Use * to match a series — DCIM/1*MSDCF covers 100MSDCF, 101MSDCF, …"
+              help="Folders on the drive to copy from, one per line. Use * to match a series — DCIM/1*MSDCF covers 100MSDCF, 101MSDCF, …"
             >
               <textarea
                 rows={2}
@@ -497,7 +497,7 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
             </p>
           </Group>
 
-          <Group title="When a card is inserted">
+          <Group title="When a drive is connected">
             <label className="check">
               <input
                 type="checkbox"
@@ -528,8 +528,8 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
           <Group title="After importing">
             <div className="cols">
               <Field
-                label="Clean card"
-                help="Delete files from the card once every file is copied and verified. Permanent — cards have no Trash."
+                label="Clean drive"
+                help="Delete files from the drive once every file is copied and verified — permanent, so it only runs after the whole set is safely copied."
               >
                 <select
                   value={card.cleanup}
@@ -540,7 +540,7 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
                   <option value="never">Never</option>
                 </select>
               </Field>
-              <Field label="Eject card" help="Unmount the card when the import finishes successfully.">
+              <Field label="Eject drive" help="Unmount the drive when the import finishes successfully.">
                 <select
                   value={card.eject}
                   onChange={(e) => updateCard(i, { eject: e.target.value as EjectPolicy })}
@@ -696,7 +696,7 @@ function LightroomView({ config, patch }: { config: Config; patch: (p: Partial<C
           <>
             <Field
               label="Album name template"
-              help="Files are grouped into albums by date — same tokens as a card's folder structure: {year}, {date}, {name}."
+              help="Files are grouped into albums by date — same tokens as a drive's folder structure: {year}, {date}, {name}."
             >
               <input
                 placeholder="{date} {name}"
@@ -792,7 +792,7 @@ function ActivityView({ activity }: { activity: ActivityEntry[] }) {
       {activity.length === 0 && (
         <div className="empty">
           <p>Nothing yet.</p>
-          <p className="hint">Card imports and Lightroom syncs will show up here.</p>
+          <p className="hint">Drive imports and Lightroom syncs will show up here.</p>
         </div>
       )}
       <ul className="log">

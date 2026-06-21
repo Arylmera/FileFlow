@@ -66,8 +66,8 @@ pub fn prepare_ingest(state: State<AppState>, uuid: String) -> Result<Vec<DateGr
         .iter()
         .find(|c| c.uuid.eq_ignore_ascii_case(&uuid))
         .cloned()
-        .ok_or("no card rule matches that UUID")?;
-    let volume_root = volume::find_volume_by_uuid(&uuid).ok_or("card not mounted")?;
+        .ok_or("no drive rule matches that UUID")?;
+    let volume_root = volume::find_volume_by_uuid(&uuid).ok_or("drive not connected")?;
     ingest::resolve_dest(&rule).map_err(|e| e.to_string())?;
     Ok(ingest::scan_dates(&rule, &volume_root))
 }
@@ -86,8 +86,8 @@ pub fn run_ingest_now(
         .iter()
         .find(|c| c.uuid.eq_ignore_ascii_case(&uuid))
         .cloned()
-        .ok_or("no card rule matches that UUID")?;
-    let volume_root = volume::find_volume_by_uuid(&uuid).ok_or("card not mounted")?;
+        .ok_or("no drive rule matches that UUID")?;
+    let volume_root = volume::find_volume_by_uuid(&uuid).ok_or("drive not connected")?;
     let dest = ingest::resolve_dest(&rule).map_err(|e| e.to_string())?;
     std::thread::spawn(move || {
         watchers::run_card_ingest(&app, &rule, &volume_root, &names, &dest);

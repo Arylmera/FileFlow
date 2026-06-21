@@ -445,7 +445,7 @@ button.danger:hover:not(:disabled) {
   color: #fff;
 }
 
-.badge.card {
+.badge.drive {
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
 }
