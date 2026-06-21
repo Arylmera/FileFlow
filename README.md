@@ -89,5 +89,7 @@ signing; it's inert for ad-hoc dev builds.
 - **Logs** — `~/Library/Logs/com.guillaumelemer.fileflow/fileflow.log`
   (*Settings ▸ Open log file*; verbosity via *Settings ▸ Log level*).
 
-The app runs as a menu-bar agent (no Dock icon); the window is reachable from the
-tray. It launches at login when enabled and enforces a single instance.
+By default the app runs as a menu-bar agent (no Dock icon), reachable from the
+tray. *Settings* toggles the Dock and menu-bar icons independently — at least one
+stays visible so the window is always reachable. It launches at login when enabled
+and enforces a single instance.

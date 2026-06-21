@@ -23,8 +23,10 @@ pub fn get_config(state: State<AppState>) -> Config {
 }
 
 #[tauri::command]
-pub fn save_config(state: State<AppState>, config: Config) -> Result<(), String> {
+pub fn save_config(app: AppHandle, state: State<AppState>, mut config: Config) -> Result<(), String> {
+    config.app.ensure_reachable();
     config.save(&state.config_path).map_err(|e| e.to_string())?;
+    crate::apply_window_mode(&app, &config.app);
     *state.config.lock().unwrap() = config;
     Ok(())
 }

@@ -959,6 +959,31 @@ function SettingsView({ config, patch }: { config: Config; patch: (p: Partial<Co
       </label>
       <p className="help check-help">When off, closing the window quits FileFlow.</p>
 
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={config.app.show_tray_icon}
+          disabled={config.app.show_tray_icon && !config.app.show_dock_icon}
+          onChange={(e) =>
+            patch({ app: { ...config.app, show_tray_icon: e.target.checked } })
+          }
+        />
+        Show menu-bar icon
+      </label>
+
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={config.app.show_dock_icon}
+          disabled={config.app.show_dock_icon && !config.app.show_tray_icon}
+          onChange={(e) =>
+            patch({ app: { ...config.app, show_dock_icon: e.target.checked } })
+          }
+        />
+        Show Dock icon
+      </label>
+      <p className="help check-help">Keep at least one of the menu-bar or Dock icon visible.</p>
+
       <Field label="Log level" help="How much detail is written to the log file. “info” is usually enough.">
         <select
           value={config.app.log_level}

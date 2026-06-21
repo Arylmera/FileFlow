@@ -152,8 +152,24 @@ pub struct AppSettings {
     /// Hide to the menu bar on window close instead of quitting.
     #[serde(default = "default_true")]
     pub keep_running_on_close: bool,
+    /// Show the app's icon in the macOS Dock.
+    #[serde(default)]
+    pub show_dock_icon: bool,
+    /// Show the app's icon in the macOS menu bar.
+    #[serde(default = "default_true")]
+    pub show_tray_icon: bool,
     #[serde(default = "default_log_level")]
     pub log_level: String,
+}
+
+impl AppSettings {
+    /// At least one of the Dock or menu-bar icon must stay visible, else the
+    /// app has no surface and becomes unreachable. If both are off, keep the tray.
+    pub fn ensure_reachable(&mut self) {
+        if !self.show_dock_icon && !self.show_tray_icon {
+            self.show_tray_icon = true;
+        }
+    }
 }
 
 impl Default for AppSettings {
@@ -161,6 +177,8 @@ impl Default for AppSettings {
         AppSettings {
             autostart: true,
             keep_running_on_close: true,
+            show_dock_icon: false,
+            show_tray_icon: true,
             log_level: default_log_level(),
         }
     }
@@ -240,5 +258,17 @@ mod tests {
         assert!(!folder_block.contains("album_mode"), "folder rule has no photos fields:\n{out}");
         let photos_block = out.split("[[folder]]").nth(2).unwrap();
         assert!(!photos_block.contains("dest ="), "photos rule has no folder fields:\n{out}");
+    }
+
+    #[test]
+    fn ensure_reachable_keeps_a_surface() {
+        // Both off → tray restored; any other combination is left untouched.
+        let mut hidden = AppSettings { show_dock_icon: false, show_tray_icon: false, ..Default::default() };
+        hidden.ensure_reachable();
+        assert!(hidden.show_tray_icon && !hidden.show_dock_icon);
+
+        let mut dock_only = AppSettings { show_dock_icon: true, show_tray_icon: false, ..Default::default() };
+        dock_only.ensure_reachable();
+        assert!(dock_only.show_dock_icon && !dock_only.show_tray_icon);
     }
 }

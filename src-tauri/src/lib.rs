@@ -17,6 +17,23 @@ pub(crate) fn show_main(app: &tauri::AppHandle) {
     }
 }
 
+/// Apply the Dock + menu-bar visibility from config. Called at startup and on
+/// every save so the toggles take effect live. Callers normalize first
+/// (`AppSettings::ensure_reachable`) so at least one surface stays visible.
+pub(crate) fn apply_window_mode(app: &tauri::AppHandle, cfg: &fileflow_core::config::AppSettings) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app.set_activation_policy(if cfg.show_dock_icon {
+            tauri::ActivationPolicy::Regular
+        } else {
+            tauri::ActivationPolicy::Accessory
+        });
+    }
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        let _ = tray.set_visible(cfg.show_tray_icon);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -31,8 +48,8 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            // Menu-bar agent: no Dock icon. LSUIElement in Info.plist isn't always
-            // honoured for ad-hoc builds, so enforce it at runtime too.
+            // Boot as a menu-bar agent (no Dock icon) to avoid a launch flash;
+            // apply_window_mode below sets the configured state once config loads.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
@@ -87,7 +104,11 @@ pub fn run() {
 
             // App state: load persisted config (missing file → defaults).
             let config_path = app.path().app_config_dir()?.join("config.toml");
-            let config = fileflow_core::config::Config::load(&config_path).unwrap_or_default();
+            let mut config = fileflow_core::config::Config::load(&config_path).unwrap_or_default();
+            config.app.ensure_reachable();
+
+            // Apply the Dock/menu-bar visibility now that the tray exists.
+            apply_window_mode(app.handle(), &config.app);
 
             // File logging to the app log dir (single non-rotating file).
             if let Ok(log_dir) = app.path().app_log_dir() {
