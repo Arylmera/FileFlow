@@ -1,0 +1,47 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="140" y1="120" x2="884" y2="904" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4C9AFF"/>
+      <stop offset="0.52" stop-color="#3B6FE0"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="512" y1="96" x2="512" y2="660" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" stop-opacity="0.26"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="sky" x1="512" y1="316" x2="512" y2="676" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E8F0FE"/>
+      <stop offset="1" stop-color="#EDE7FB"/>
+    </linearGradient>
+    <linearGradient id="badge" x1="700" y1="600" x2="700" y2="804" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3B6FE0"/>
+      <stop offset="1" stop-color="#7C4DF0"/>
+    </linearGradient>
+    <clipPath id="frontClip"><rect x="300" y="316" width="424" height="360" rx="54"/></clipPath>
+  </defs>
+
+  <!-- background squircle -->
+  <rect x="96" y="96" width="832" height="832" rx="196" fill="url(#bg)"/>
+  <rect x="96" y="96" width="832" height="832" rx="196" fill="url(#sheen)"/>
+
+  <!-- back card: a peeking second photo, for the stack / flow -->
+  <rect x="352" y="280" width="360" height="312" rx="46" fill="#ffffff" opacity="0.30"
+        transform="rotate(-11 512 512)"/>
+
+  <!-- front photo card -->
+  <rect x="300" y="316" width="424" height="360" rx="54" fill="#ffffff"/>
+  <g clip-path="url(#frontClip)">
+    <rect x="300" y="316" width="424" height="360" fill="url(#sky)"/>
+    <circle cx="410" cy="428" r="48" fill="#F59E0B"/>
+    <path d="M300 676 L474 466 L596 600 L664 520 L724 596 L724 676 Z" fill="#8B5CF6" opacity="0.5"/>
+    <path d="M300 676 L454 506 L608 676 Z" fill="#3B6FE0"/>
+  </g>
+
+  <!-- import / flow badge -->
+  <circle cx="700" cy="700" r="106" fill="#ffffff"/>
+  <circle cx="700" cy="700" r="86" fill="url(#badge)"/>
+  <g fill="#ffffff">
+    <rect x="684" y="646" width="32" height="74" rx="16"/>
+    <path d="M650 702 L700 760 L750 702 Z"/>
+  </g>
+</svg>

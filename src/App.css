@@ -1,52 +1,58 @@
 :root {
-  /* Native: tint form controls + scrollbars, and let the OS pick control chrome. */
   color-scheme: light dark;
-  accent-color: #0a84ff;
+  accent-color: #3b6fe0;
 
-  --bg: #ffffff;
-  --panel: #f5f5f7;
-  --border: #d2d2d7;
-  --text: #1d1d1f;
-  --muted: #6e6e73;
-  --accent: #0a84ff;
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --border: #e4e6ec;
+  --text: #1c1d22;
+  --muted: #696b76;
+  --accent: #3b6fe0;
+  --accent-2: #8b5cf6;
   --ok: #1a8f3c;
   --warn: #c2410c;
 
-  --hover: rgba(0, 0, 0, 0.045);
-  --ring: rgba(10, 132, 255, 0.35);
-  --shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  --hover: rgba(20, 25, 50, 0.05);
+  --soft: rgba(59, 111, 224, 0.1);
+  --ring: rgba(59, 111, 224, 0.28);
+  --shadow: 0 10px 30px rgba(20, 25, 50, 0.08);
+  --shadow-sm: 0 1px 2px rgba(20, 25, 50, 0.06);
 
-  /* Spacing scale (4px base) */
   --s1: 4px;
   --s2: 8px;
   --s3: 12px;
   --s4: 16px;
-  --s5: 24px;
+  --s5: 22px;
   --s6: 32px;
 
-  --r: 6px;
-  --r-lg: 10px;
-  --t: 140ms cubic-bezier(0.2, 0.6, 0.2, 1);
+  --r: 8px;
+  --r-lg: 14px;
+  --t: 150ms cubic-bezier(0.2, 0.6, 0.2, 1);
 
   --z-backdrop: 100;
   --z-modal: 110;
 
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 13px;
+  font-size: 13.5px;
   color: var(--text);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1c1c1e;
-    --panel: #2c2c2e;
-    --border: #3a3a3c;
-    --text: #f5f5f7;
-    --muted: #98989d;
+    --bg: #15161a;
+    --surface: #212229;
+    --border: #34353f;
+    --text: #f1f2f6;
+    --muted: #9a9caa;
+    --accent: #5b8dff;
+    --accent-2: #a78bfa;
     --ok: #30d158;
-    --warn: #ff9f0a;
+    --warn: #ffb02e;
     --hover: rgba(255, 255, 255, 0.06);
-    --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    --soft: rgba(91, 141, 255, 0.16);
+    --ring: rgba(91, 141, 255, 0.36);
+    --shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   }
 }
 
@@ -60,7 +66,6 @@ body {
   color: var(--text);
 }
 
-/* Visible keyboard focus everywhere; pointer focus stays quiet. */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -86,19 +91,23 @@ body {
   display: flex;
   align-items: center;
   gap: var(--s3);
-  padding: var(--s2) var(--s3);
+  padding: var(--s2) var(--s4);
   border-bottom: 1px solid var(--border);
-  background: var(--panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .topbar strong {
-  font-size: 14px;
-  letter-spacing: -0.01em;
+  font-size: 15px;
+  letter-spacing: -0.02em;
 }
 
 .topbar nav {
   display: flex;
-  gap: var(--s1);
+  gap: 2px;
   flex: 1;
 }
 
@@ -109,6 +118,7 @@ body {
   border-radius: var(--r);
   color: var(--muted);
   cursor: pointer;
+  font-weight: 500;
   transition: background var(--t), color var(--t);
 }
 
@@ -118,21 +128,25 @@ body {
 }
 
 .tab.active {
-  background: var(--bg);
-  color: var(--text);
-  box-shadow: inset 0 0 0 1px var(--border);
+  background: var(--soft);
+  color: var(--accent);
 }
 
 main {
   flex: 1;
   overflow: auto;
-  padding: var(--s4);
+  padding: var(--s6) var(--s4);
+}
+
+main > section {
+  max-width: 720px;
+  margin: 0 auto;
 }
 
 h2 {
   margin: 0 0 var(--s3);
-  font-size: 16px;
-  letter-spacing: -0.01em;
+  font-size: 19px;
+  letter-spacing: -0.02em;
 }
 
 h3 {
@@ -143,14 +157,16 @@ h3 {
 
 button {
   font: inherit;
-  padding: var(--s1) var(--s3);
+  font-weight: 500;
+  padding: 7px 14px;
   border-radius: var(--r);
   border: 1px solid var(--border);
-  background: var(--bg);
+  background: var(--surface);
   color: var(--text);
   cursor: pointer;
+  box-shadow: var(--shadow-sm);
   transition: background var(--t), border-color var(--t), color var(--t), transform var(--t),
-    filter var(--t);
+    filter var(--t), box-shadow var(--t);
 }
 
 button:hover:not(:disabled) {
@@ -165,28 +181,27 @@ button:active:not(:disabled) {
 button:disabled {
   opacity: 0.5;
   cursor: default;
+  box-shadow: none;
 }
 
 button.primary,
 button.save:not(:disabled) {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
-  border-color: var(--accent);
+  border-color: transparent;
 }
 
 button.primary:hover:not(:disabled),
 button.save:hover:not(:disabled) {
-  filter: brightness(1.08);
-  background: var(--accent);
-  border-color: var(--accent);
+  filter: brightness(1.07);
 }
 
-/* Saved/idle: a calm ghost, not a washed-out primary. */
 button.save:disabled {
   opacity: 1;
   background: transparent;
   color: var(--muted);
   border-color: var(--border);
+  box-shadow: none;
 }
 
 button.danger {
@@ -209,57 +224,52 @@ button.danger:hover:not(:disabled) {
 
 .row.end {
   justify-content: flex-end;
-  margin-top: var(--s3);
-}
-
-.row.gap {
-  gap: var(--s4);
+  margin-top: var(--s4);
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: var(--s1);
-  margin: var(--s3) 0;
+  gap: 6px;
+  margin: var(--s4) 0;
 }
 
 .field .lbl {
   display: flex;
   align-items: center;
   gap: var(--s2);
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--text);
 }
 
-/* "How to fill this in" hint under a field. */
 .field .help,
 .help {
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 11.5px;
+  line-height: 1.5;
   color: var(--muted);
 }
 
 .check-help {
-  margin: calc(var(--s1) * -1) 0 var(--s3) 26px;
-}
-
-::placeholder {
-  color: var(--muted);
-  opacity: 0.7;
+  margin: -2px 0 var(--s4) 28px;
 }
 
 .field input,
 .field select,
 .field textarea {
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text);
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r);
-  padding: var(--s1) var(--s2);
+  padding: 9px 12px;
   transition: border-color var(--t), box-shadow var(--t);
+}
+
+.field textarea {
+  resize: vertical;
+  line-height: 1.5;
 }
 
 .field input:hover,
@@ -273,28 +283,38 @@ button.danger:hover:not(:disabled) {
 .field textarea:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--ring);
+  box-shadow: 0 0 0 4px var(--ring);
 }
 
 .field .row input {
   flex: 1;
 }
 
+::placeholder {
+  color: var(--muted);
+  opacity: 0.65;
+}
+
 .check {
   display: flex;
   align-items: center;
   gap: var(--s2);
-  margin: var(--s3) 0;
+  margin: var(--s4) 0 0;
+  font-size: 14px;
+}
+
+.check input {
+  width: 16px;
+  height: 16px;
 }
 
 .muted {
   color: var(--muted);
 }
 
-/* Empty states that point at the next action. */
 .empty {
   color: var(--muted);
-  padding: var(--s5) 0;
+  padding: var(--s6) 0;
 }
 
 .empty p {
@@ -314,8 +334,8 @@ button.danger:hover:not(:disabled) {
 }
 
 .list li {
-  padding: var(--s2);
-  margin: 0 calc(var(--s2) * -1);
+  padding: var(--s3);
+  margin: 0 calc(var(--s3) * -1);
   border-radius: var(--r);
   border-bottom: 1px solid var(--border);
   transition: background var(--t);
@@ -328,9 +348,10 @@ button.danger:hover:not(:disabled) {
 .card-edit {
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  padding: var(--s4);
-  margin-bottom: var(--s4);
-  background: var(--panel);
+  padding: var(--s5);
+  margin-bottom: var(--s5);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .card-head {
@@ -338,18 +359,17 @@ button.danger:hover:not(:disabled) {
 }
 
 .card-sub {
-  font-size: 12px;
-  margin-top: 2px;
+  font-size: 12.5px;
+  margin-top: 3px;
   word-break: break-all;
 }
 
-/* View header: title + one-line description, action on the right. */
 .view-head {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: var(--s4);
-  margin-bottom: var(--s4);
+  margin-bottom: var(--s5);
 }
 
 .view-head h2 {
@@ -357,31 +377,30 @@ button.danger:hover:not(:disabled) {
 }
 
 .subtitle {
-  margin: 3px 0 0;
-  font-size: 12px;
-  line-height: 1.45;
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
   color: var(--muted);
-  max-width: 64ch;
+  max-width: 60ch;
 }
 
-/* Field groups inside a card editor, separated by a hairline. */
 .group {
-  margin-top: var(--s4);
-  padding-top: var(--s4);
+  margin-top: var(--s5);
+  padding-top: var(--s5);
   border-top: 1px solid var(--border);
 }
 
 .group:first-of-type {
-  margin-top: var(--s3);
+  margin-top: var(--s4);
   padding-top: 0;
   border-top: none;
 }
 
 .group-title {
-  margin: 0 0 var(--s1);
-  font-size: 12px;
+  margin: 0 0 var(--s2);
+  font-size: 12.5px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--accent);
 }
 
 .cols {
@@ -391,27 +410,27 @@ button.danger:hover:not(:disabled) {
   align-items: start;
 }
 
-/* Worked example under the folder-structure field. */
 .preview {
-  margin: calc(var(--s1) * -1) 0 var(--s3);
-  font-size: 11px;
+  margin: -2px 0 var(--s4);
+  font-size: 11.5px;
   color: var(--muted);
 }
 
 .preview code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text);
-  background: var(--hover);
-  padding: 1px 6px;
-  border-radius: 4px;
+  background: var(--soft);
+  padding: 2px 7px;
+  border-radius: 6px;
 }
 
 .badge {
   display: inline-block;
   font-size: 11px;
-  padding: 1px 7px;
-  border-radius: 10px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
   background: var(--border);
   color: var(--text);
 }
@@ -427,7 +446,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .badge.card {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
 }
 
@@ -438,10 +457,10 @@ button.danger:hover:not(:disabled) {
 
 .log li {
   display: flex;
-  gap: var(--s2);
+  gap: var(--s3);
   align-items: baseline;
-  padding: var(--s1) 0;
-  font-size: 12px;
+  padding: var(--s2) 0;
+  font-size: 12.5px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -454,7 +473,8 @@ button.danger:hover:not(:disabled) {
   position: fixed;
   inset: 0;
   z-index: var(--z-backdrop);
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(10, 12, 24, 0.5);
+  backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -464,16 +484,16 @@ button.danger:hover:not(:disabled) {
 .modal {
   position: relative;
   z-index: var(--z-modal);
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow);
-  padding: var(--s5);
-  min-width: 360px;
+  padding: var(--s6);
+  min-width: 380px;
   max-width: 90vw;
   max-height: 85vh;
   overflow: auto;
-  animation: modal-in 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  animation: modal-in 190ms cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
 @keyframes backdrop-in {
