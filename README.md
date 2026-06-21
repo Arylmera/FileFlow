@@ -54,13 +54,15 @@ Your files are irreplaceable, so the destructive path — wiping a drive after i
 
 ## Install
 
-FileFlow is a personal utility, not an App Store download — you run it as a `.app` you build (or are handed).
+FileFlow is a personal utility, not an App Store download. The fastest way in — one command, nothing else to do:
 
-- **You have a build already** — drag `FileFlow.app` into `/Applications` and launch it. macOS Gatekeeper warns the first time an ad-hoc / unsigned build runs: right-click the app ▸ **Open**, or clear the quarantine flag once with
-  ```sh
-  xattr -dr com.apple.quarantine /Applications/FileFlow.app
-  ```
-- **You're building it yourself** — see [Build from source](#build-from-source).
+```sh
+curl -fsSL https://raw.githubusercontent.com/Arylmera/FileFlow/main/install.sh | sh
+```
+
+This grabs the latest release, drops `FileFlow.app` into `/Applications`, and launches it. macOS only quarantines files a *browser* downloads, so an app delivered over `curl` carries no quarantine flag — the unsigned build opens straight away, with **no Gatekeeper prompt and no right-click ▸ Open**. (Reading a script before piping it to a shell is always fair — it's [`install.sh`](install.sh).)
+
+Prefer to do it by hand? Drag `FileFlow.app` into `/Applications` and launch it. A browser-downloaded build *is* quarantined, so macOS warns on first run — right-click the app ▸ **Open**, or clear the flag once with `xattr -dr com.apple.quarantine /Applications/FileFlow.app`. Building it yourself? See [Build from source](#build-from-source).
 
 On first launch FileFlow lives in the **menu bar** (no Dock icon by default). Click the tray icon to open the control panel.
 
@@ -107,6 +109,24 @@ The default build produces the `.app` only, which works headlessly. The **`.dmg`
 drives Finder via AppleScript to lay out the disk-image window and only succeeds in an
 interactive GUI login session — run `npm run build:dmg` from a logged-in desktop, or just
 distribute the `.app`.
+
+### Publishing a release
+
+The `curl | sh` installer pulls the latest GitHub release's `FileFlow.app.tar.gz`. To cut one:
+
+```sh
+npm run tauri build                                       # → target/release/bundle/macos/FileFlow.app
+APP=target/release/bundle/macos/FileFlow.app
+codesign --force --deep -s - "$APP"                       # re-seal ad-hoc — the bundler can leave it unsealed
+codesign --verify --deep --strict "$APP"                  # must pass, or the app launches as "damaged"
+tar -czf FileFlow.app.tar.gz -C "$(dirname "$APP")" FileFlow.app
+gh release create v0.1.0 FileFlow.app.tar.gz              # newest non-prerelease becomes "latest"
+```
+
+The re-seal matters: an unsealed bundle (no `Contents/_CodeSignature`) fails Gatekeeper's
+integrity check and is killed on launch even via `curl`. Re-signing keeps it **ad-hoc** —
+no Developer ID, no notarization — just *valid*. For later versions, bump the tag
+(`gh release create v0.1.1 …`).
 
 ### Code signing & TCC persistence
 
