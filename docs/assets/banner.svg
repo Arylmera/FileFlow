@@ -1,4 +1,4 @@
-<svg width="1200" height="300" viewBox="0 0 1200 300" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="FileFlow — automatic photo ingest and Lightroom to Photos for macOS">
+<svg width="1200" height="300" viewBox="0 0 1200 300" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="FileFlow — automatic file ingest and routing for macOS">
   <defs>
     <linearGradient id="panel" x1="0" y1="0" x2="1200" y2="300" gradientUnits="userSpaceOnUse">
       <stop stop-color="#4C9AFF"/>
@@ -46,9 +46,9 @@
   <!-- wordmark -->
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
     <text x="300" y="142" font-size="92" font-weight="700" fill="#ffffff" letter-spacing="-2">FileFlow</text>
-    <text x="303" y="196" font-size="31" font-weight="500" fill="#ffffff" opacity="0.92">Automatic photo ingest &amp; Lightroom&#8201;&#8594;&#8201;Photos for macOS</text>
-    <!-- menu-bar pill -->
-    <rect x="303" y="222" width="246" height="38" rx="19" fill="#ffffff" opacity="0.16"/>
-    <text x="324" y="247" font-size="20" font-weight="600" fill="#ffffff">menu-bar app · runs unattended</text>
+    <text x="303" y="196" font-size="31" font-weight="500" fill="#ffffff" opacity="0.92">Automatic file ingest &amp; routing for macOS</text>
+    <!-- flow pill -->
+    <rect x="303" y="222" width="452" height="38" rx="19" fill="#ffffff" opacity="0.16"/>
+    <text x="324" y="247" font-size="20" font-weight="600" fill="#ffffff">drive&#8201;&#8594;&#8201;folder&#8201;&#8594;&#8201;Photos · runs unattended</text>
   </g>
 </svg>

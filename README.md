@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/banner.svg" alt="FileFlow — automatic photo ingest & Lightroom → Photos for macOS" width="100%">
+  <img src="docs/assets/banner.svg" alt="FileFlow — automatic file ingest & routing for macOS" width="100%">
 </p>
 
 <p align="center">
@@ -11,8 +11,8 @@
 </p>
 
 <p align="center">
-  A quiet macOS menu-bar app that handles two photo chores so you don't have to:<br>
-  <b>ingest your SD card</b> and <b>import your Lightroom exports into Photos</b> — automatically, and safely.
+  A quiet macOS menu-bar app that moves your files where they belong — automatically, and safely.<br>
+  Ingest a <b>drive into dated folders</b>, route <b>one folder into another</b>, or import straight <b>into Apple Photos</b>.
 </p>
 
 <p align="center">
@@ -29,23 +29,24 @@
 
 ## What it does
 
-FileFlow runs in the background and automates two jobs:
+FileFlow watches **sources** and routes new files to **destinations** — verified on the way,
+safe by default. Three flows, set up once from the control panel and then left alone:
 
-| | Job | What happens |
+| | Flow | What happens |
 |---|---|---|
-| 📷 | **Drive ingest** | Plug in a recognised external drive (SD card, USB stick, …) and FileFlow copies its photos into a per-drive destination, foldered by capture date, verifies every copy, then — optionally — wipes and ejects the drive. |
-| 🌉 | **Lightroom → Photos** | Watches a Lightroom export folder; new files are imported into an Apple Photos album automatically. |
+| 💾 | **Drive → folder** | Plug in a recognised external drive (SD card, USB stick, …) and FileFlow copies its files into a destination, organized by capture date, verifies every copy, then — optionally — wipes and ejects the drive. Moves any file type by default; filter by extension if you want. |
+| 📁 | **Folder → folder** | Watch a folder; whatever lands in it is moved into a target folder, filtered by extension. |
+| 🖼️ | **Folder → Photos** | Point a watched folder (e.g. your Lightroom exports) at an Apple Photos album, and new files are imported automatically. |
 
-Each drive's destination is **whatever resolves to a writable path** — a local folder, a
-cloud-synced folder (OneDrive, iCloud Drive, Dropbox, Google Drive), a mounted network
-share (SMB/NFS, e.g. a TrueNAS dataset), or another external drive.
+A destination is **any writable path** — a local folder, a cloud-synced folder (OneDrive,
+iCloud Drive, Dropbox, Google Drive), a mounted network share (SMB/NFS, e.g. a TrueNAS
+dataset), or another drive — plus Apple Photos as a built-in destination.
 
-You set everything up once from the control-panel window, then forget about it — the goal
-is a tool you trust to run unattended and rarely need to open.
+The goal is a tool you trust to run unattended and rarely need to open.
 
 ## Safety model
 
-Your photos are irreplaceable, so the destructive path is deliberately paranoid:
+Your files are irreplaceable, so the destructive path — wiping a drive after ingest — is deliberately paranoid:
 
 - **Verified copies** — every file is checked (byte size) at the destination before it counts as copied.
 - **All-or-nothing deletion** — the drive is wiped *only* after *every* file in the set has copied and verified. Any single failure — including the destination going unreachable mid-run — aborts deletion entirely, so a partial or interrupted copy can never lose data.
@@ -65,23 +66,23 @@ On first launch FileFlow lives in the **menu bar** (no Dock icon by default). Cl
 
 ## First-run setup
 
-FileFlow needs two macOS permissions to do its work. It detects when either is missing and surfaces guidance in the window — you don't have to hunt for them blind.
+Depending on which flows you use, FileFlow needs one or two macOS permissions. It detects when either is missing and surfaces guidance in the window — you don't have to hunt for them blind.
 
 | Permission | Why it's needed | Where to grant it |
 |---|---|---|
 | **Full Disk Access** | Read drive contents under `/Volumes` and write into protected destinations (e.g. `~/Library/CloudStorage`). | *System Settings ▸ Privacy & Security ▸ Full Disk Access* |
-| **Automation (Photos)** | Control Photos to import Lightroom exports. macOS prompts on the first import. | *System Settings ▸ Privacy & Security ▸ Automation* |
+| **Automation (Photos)** | Control Photos to import into an album — only for a *Folder → Photos* rule. macOS prompts on the first import. | *System Settings ▸ Privacy & Security ▸ Automation* |
 
 > [!NOTE]
 > Ad-hoc dev builds re-prompt for these on every rebuild, because the signature changes each time. To make grants stick, sign with a stable identity — see [Code signing & TCC persistence](#code-signing--tcc-persistence).
 
 ## Configure
 
-Open the control panel from the tray icon, then:
+Open the control panel from the tray icon, then add the rules you need:
 
-1. **Add a drive rule** — pick a drive to recognise and its destination folder; choose whether to verify-then-wipe-and-eject after a successful copy.
-2. **Add the Lightroom rule** — point it at your Lightroom export folder and the target Photos album.
-3. Leave it running. Trigger an import manually any time, and check the **activity log** for what happened.
+1. **Drive rule** (drive → folder) — pick a drive to recognise and its destination; choose whether to verify-then-wipe-and-eject after a successful copy, and optionally restrict it to certain extensions.
+2. **Folder rule** (folder → folder, or folder → Photos) — point a watched folder at a target folder or an Apple Photos album, filtered by extension.
+3. Leave it running. Trigger a run manually any time, and check the **activity log** for what happened.
 
 Settings live in a single config file, managed entirely from the UI — see [Files & locations](#files--locations).
 
