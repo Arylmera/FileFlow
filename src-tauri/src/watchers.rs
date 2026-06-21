@@ -6,6 +6,7 @@
 use crate::state::{ActivityEntry, AppState};
 use crate::volume;
 use fileflow_core::config::{AlbumMode, CardRule, CleanupPolicy, EjectPolicy, LightroomRule};
+use fileflow_core::folder;
 use fileflow_core::ingest::{self, DateGroup};
 use fileflow_core::photos;
 use notify::{RecursiveMode, Watcher};
@@ -22,6 +23,7 @@ use tauri_plugin_notification::NotificationExt;
 struct WatcherHandles {
     _volumes: notify::RecommendedWatcher,
     _export: Option<notify::RecommendedWatcher>,
+    _folders: Vec<notify::RecommendedWatcher>,
 }
 
 #[derive(Clone, Serialize)]
@@ -78,9 +80,27 @@ pub fn start(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    // --- Folder-to-folder watchers (one per configured rule) ---
+    let mut folder_watchers = Vec::new();
+    for (i, rule) in app.state::<AppState>().snapshot().folders.iter().enumerate() {
+        let folder = ingest::expand(&rule.watch);
+        if !folder.is_dir() {
+            continue;
+        }
+        let (ftx, frx) = mpsc::channel::<()>();
+        let mut w = notify::recommended_watcher(move |_res| {
+            let _ = ftx.send(());
+        })?;
+        w.watch(&folder, RecursiveMode::NonRecursive)?;
+        let h = handle.clone();
+        std::thread::spawn(move || folder_worker(h, i, frx));
+        folder_watchers.push(w);
+    }
+
     app.manage(Mutex::new(WatcherHandles {
         _volumes: vol_watcher,
         _export: export_watcher,
+        _folders: folder_watchers,
     }));
     Ok(())
 }
@@ -116,6 +136,58 @@ fn export_worker(app: AppHandle, rx: mpsc::Receiver<()>) {
             continue;
         }
         run_photos_flow(&app);
+    }
+}
+
+/// Move after 3s of quiet, for the folder rule at `index`.
+fn folder_worker(app: AppHandle, index: usize, rx: mpsc::Receiver<()>) {
+    loop {
+        if rx.recv().is_err() {
+            break;
+        }
+        loop {
+            match rx.recv_timeout(Duration::from_secs(3)) {
+                Ok(()) => continue,
+                Err(RecvTimeoutError::Timeout) => break,
+                Err(RecvTimeoutError::Disconnected) => return,
+            }
+        }
+        if app.state::<AppState>().is_paused() {
+            continue;
+        }
+        run_folder_flow(&app, index);
+    }
+}
+
+/// Move the watched folder's contents into its dated destination. Public for the manual trigger.
+pub fn run_folder_flow(app: &AppHandle, index: usize) {
+    let Some(rule) = app.state::<AppState>().snapshot().folders.get(index).cloned() else {
+        return;
+    };
+    let label = if rule.label.is_empty() {
+        "Folder".to_string()
+    } else {
+        rule.label.clone()
+    };
+    match folder::run_folder_move(&rule) {
+        Ok(report) => {
+            if report.moved.is_empty() && report.failed.is_empty() {
+                return;
+            }
+            let msg = format!(
+                "{}: moved {} file(s), {} failed → {}",
+                label,
+                report.moved.len(),
+                report.failed.len(),
+                rule.dest
+            );
+            notify(app, "FileFlow — Folder move", &msg);
+            emit_activity(app, "folder", &msg);
+        }
+        Err(e) => {
+            notify(app, "FileFlow — destination unavailable", &e.to_string());
+            emit_activity(app, "folder", &format!("{label}: {e}"));
+        }
     }
 }
 

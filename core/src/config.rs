@@ -8,10 +8,26 @@ use std::path::Path;
 pub struct Config {
     #[serde(rename = "card", default)]
     pub cards: Vec<CardRule>,
+    #[serde(rename = "folder", default)]
+    pub folders: Vec<FolderRule>,
     #[serde(default)]
     pub lightroom: Option<LightroomRule>,
     #[serde(default)]
     pub app: AppSettings,
+}
+
+/// Watch a folder and move whatever lands in it into a dated destination.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FolderRule {
+    #[serde(default)]
+    pub label: String,
+    pub watch: String,
+    pub dest: String,
+    #[serde(default = "default_folder_layout")]
+    pub layout: String,
+    /// Empty = move all file types.
+    #[serde(default)]
+    pub extensions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,6 +147,9 @@ fn default_true() -> bool {
 }
 fn default_layout() -> String {
     "{year}/{date} {name}".into()
+}
+fn default_folder_layout() -> String {
+    "{year}/{date}".into()
 }
 fn default_album() -> String {
     "Lightroom".into()

@@ -2,7 +2,7 @@
 
 use crate::config::AfterImport;
 use crate::ingest::DateGroup;
-use crate::util::{ext_matches, is_hidden};
+use crate::util::{ext_matches, is_hidden, move_file};
 use crate::{layout, Error, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -164,16 +164,6 @@ pub fn import_to_photos(
         }
     };
     Ok(PhotosReport { imported: files.len(), album })
-}
-
-/// Move a file, falling back to copy+remove across filesystems.
-fn move_file(src: &Path, dest: &Path) -> Result<()> {
-    if std::fs::rename(src, dest).is_ok() {
-        return Ok(());
-    }
-    std::fs::copy(src, dest)?;
-    std::fs::remove_file(src)?;
-    Ok(())
 }
 
 /// Apply the post-import policy to the source export files (only after a successful import).

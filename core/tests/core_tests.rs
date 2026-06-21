@@ -1,4 +1,5 @@
-use fileflow_core::config::{AfterImport, CardRule, CleanupPolicy, EjectPolicy, NameMode};
+use fileflow_core::config::{AfterImport, CardRule, CleanupPolicy, EjectPolicy, FolderRule, NameMode};
+use fileflow_core::folder::run_folder_move;
 use fileflow_core::ingest::{
     cleanup, plan_ingest, run_ingest, scan_dates, scan_files, FailedCopy, IngestReport,
 };
@@ -201,6 +202,50 @@ fn after_import_archive_moves_files() {
     after_import(&[exp.clone()], AfterImport::Archive, &archive).unwrap();
     assert!(!exp.exists(), "source moved out");
     assert!(archive.join("a.jpg").exists(), "file landed in archive");
+}
+
+fn folder_rule(watch: &str, dest: &str) -> FolderRule {
+    FolderRule {
+        label: "t".into(),
+        watch: watch.into(),
+        dest: dest.into(),
+        layout: "{date}".into(),
+        extensions: vec![],
+    }
+}
+
+#[test]
+fn folder_move_relocates_into_dated_dest() {
+    let dir = tempfile::tempdir().unwrap();
+    let watch = dir.path().join("incoming");
+    let dest = dir.path().join("sorted");
+    std::fs::create_dir_all(&watch).unwrap();
+    std::fs::create_dir_all(&dest).unwrap();
+    let a = watch.join("a.jpg");
+    write_file(&a, b"x", DAY_A);
+
+    let report =
+        run_folder_move(&folder_rule(watch.to_str().unwrap(), dest.to_str().unwrap())).unwrap();
+    assert_eq!(report.moved.len(), 1);
+    assert!(report.failed.is_empty());
+    assert!(!a.exists(), "source file moved out");
+    let (_, date) = fileflow_core::layout::date_parts(
+        std::time::UNIX_EPOCH + std::time::Duration::from_secs(DAY_A as u64),
+    );
+    assert!(dest.join(&date).join("a.jpg").exists(), "moved into a dated subfolder");
+}
+
+#[test]
+fn folder_move_errors_when_dest_unavailable() {
+    let dir = tempfile::tempdir().unwrap();
+    let watch = dir.path().join("incoming");
+    std::fs::create_dir_all(&watch).unwrap();
+    write_file(&watch.join("a.jpg"), b"x", DAY_A);
+
+    let missing = dir.path().join("does-not-exist");
+    let r = run_folder_move(&folder_rule(watch.to_str().unwrap(), missing.to_str().unwrap()));
+    assert!(r.is_err(), "missing dest root → error");
+    assert!(watch.join("a.jpg").exists(), "source untouched when dest unavailable");
 }
 
 #[test]

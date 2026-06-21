@@ -455,6 +455,11 @@ button.danger:hover:not(:disabled) {
   color: #fff;
 }
 
+.badge.folder {
+  background: #0d9488;
+  color: #fff;
+}
+
 .log li {
   display: flex;
   gap: var(--s3);

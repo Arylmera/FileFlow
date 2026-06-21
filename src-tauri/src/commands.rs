@@ -108,6 +108,12 @@ pub fn run_photos_import_now(app: AppHandle, names: BTreeMap<String, String>) {
     std::thread::spawn(move || watchers::run_photos_import_named(&app, &names));
 }
 
+/// Move the watched folder's contents now (folder-to-folder rule at `index`).
+#[tauri::command]
+pub fn run_folder_now(app: AppHandle, index: usize) {
+    std::thread::spawn(move || watchers::run_folder_flow(&app, index));
+}
+
 #[tauri::command]
 pub fn get_activity(state: State<AppState>, limit: usize) -> Vec<ActivityEntry> {
     state.recent_activity(limit)

@@ -37,9 +37,18 @@ export interface AppSettings {
   log_level: string;
 }
 
-// Note: `card` (singular) — serde keeps the TOML `[[card]]` table name over IPC.
+export interface FolderRule {
+  label: string;
+  watch: string;
+  dest: string;
+  layout: string;
+  extensions: string[];
+}
+
+// Note: `card`/`folder` (singular) — serde keeps the TOML table names over IPC.
 export interface Config {
   card: CardRule[];
+  folder: FolderRule[];
   lightroom: LightroomRule | null;
   app: AppSettings;
 }
@@ -82,9 +91,14 @@ const inTauri =
 
 export const emptyConfig: Config = {
   card: [],
+  folder: [],
   lightroom: null,
   app: { autostart: true, log_level: "info" },
 };
+
+export function newFolder(): FolderRule {
+  return { label: "", watch: "", dest: "", layout: "{year}/{date}", extensions: [] };
+}
 
 export function newCard(): CardRule {
   return {
@@ -131,6 +145,7 @@ export const listMountedCards = () => load<MountedCard[]>("list_mounted_cards", 
 export const prepareIngest = (uuid: string) => invoke<DateGroup[]>("prepare_ingest", { uuid });
 export const runIngestNow = (uuid: string, names: Record<string, string>) =>
   invoke<void>("run_ingest_now", { uuid, names });
+export const runFolderNow = (index: number) => invoke<void>("run_folder_now", { index });
 export const startPhotosImport = () => invoke<void>("start_photos_import");
 export const runPhotosImportNow = (names: Record<string, string>) =>
   invoke<void>("run_photos_import_now", { names });

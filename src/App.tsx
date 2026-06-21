@@ -13,6 +13,7 @@ import type {
   Config,
   DateGroup,
   EjectPolicy,
+  FolderRule,
   LightroomRule,
   MountedCard,
   NameMode,
@@ -20,17 +21,18 @@ import type {
 } from "./api";
 import "./App.css";
 
-type Tab = "status" | "cards" | "lightroom" | "activity" | "settings";
+type Tab = "status" | "cards" | "folders" | "lightroom" | "activity" | "settings";
 
 // A request to name an import, from either flow — drives the shared naming modal.
 type NamingReq =
   | { kind: "card"; uuid: string; label: string; dates: DateGroup[] }
   | { kind: "photos"; label: string; dates: DateGroup[] };
 
-const TABS: Tab[] = ["status", "cards", "lightroom", "activity", "settings"];
+const TABS: Tab[] = ["status", "cards", "folders", "lightroom", "activity", "settings"];
 const TAB_LABELS: Record<Tab, string> = {
   status: "Status",
   cards: "External Drive",
+  folders: "Folders",
   lightroom: "Import to Photos",
   activity: "Activity",
   settings: "Settings",
@@ -59,6 +61,19 @@ function layoutExample(template: string): string {
     .filter(Boolean)
     .join("/");
   return `${folder}/DSC0001.ARW`;
+}
+
+/** A worked example of where a folder-move rule lands a file. */
+function folderExample(template: string): string {
+  const folder = template
+    .replace(/\{year\}/g, "2026")
+    .replace(/\{date\}/g, "2026-06-20")
+    .replace(/\{name\}/g, "")
+    .split("/")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join("/");
+  return folder ? `${folder}/file.jpg` : "file.jpg";
 }
 
 /** A worked example of the album name a date template produces. */
@@ -200,6 +215,7 @@ export default function App() {
           />
         )}
         {tab === "cards" && <CardsView config={config} patch={patchConfig} />}
+        {tab === "folders" && <FoldersView config={config} patch={patchConfig} />}
         {tab === "lightroom" && <LightroomView config={config} patch={patchConfig} />}
         {tab === "activity" && <ActivityView activity={activity} />}
         {tab === "settings" && <SettingsView config={config} patch={patchConfig} />}
@@ -558,7 +574,15 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
   );
 }
 
-function DestField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function DestField({
+  value,
+  onChange,
+  help,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  help?: string;
+}) {
   const [writable, setWritable] = useState<boolean | null>(null);
   useEffect(() => {
     if (!value) {
@@ -586,7 +610,10 @@ function DestField({ value, onChange }: { value: string; onChange: (v: string) =
     <Field
       label="Destination"
       badge={badge}
-      help="Where photos are copied — a folder on this Mac, a cloud folder (OneDrive, iCloud…), a network share, or an external drive."
+      help={
+        help ??
+        "Where photos are copied — a folder on this Mac, a cloud folder (OneDrive, iCloud…), a network share, or an external drive."
+      }
     >
       <div className="row">
         <input
@@ -604,6 +631,109 @@ function DestField({ value, onChange }: { value: string; onChange: (v: string) =
         </button>
       </div>
     </Field>
+  );
+}
+
+function FoldersView({ config, patch }: { config: Config; patch: (p: Partial<Config>) => void }) {
+  const update = (i: number, p: Partial<FolderRule>) =>
+    patch({ folder: config.folder.map((r, j) => (j === i ? { ...r, ...p } : r)) });
+  const remove = (i: number) => patch({ folder: config.folder.filter((_, j) => j !== i) });
+  const add = () => patch({ folder: [...config.folder, api.newFolder()] });
+
+  return (
+    <section>
+      <header className="view-head">
+        <div>
+          <h2>Folder to Folder</h2>
+          <p className="subtitle">
+            Watch a folder and move whatever lands in it into a dated destination.
+          </p>
+        </div>
+        <button onClick={add}>+ Add folder</button>
+      </header>
+
+      {config.folder.length === 0 && (
+        <div className="empty">
+          <p>No folder rules yet.</p>
+          <p className="hint">Add a rule to auto-sort files dropped into a folder.</p>
+        </div>
+      )}
+
+      {config.folder.map((rule, i) => (
+        <div key={i} className="card-edit">
+          <div className="row spread card-head">
+            <div>
+              <strong>{rule.label || "Untitled folder"}</strong>
+              {rule.watch && (
+                <div className="card-sub muted">
+                  {rule.watch} → {rule.dest || "…"}
+                </div>
+              )}
+            </div>
+            <div className="row">
+              <button onClick={() => api.runFolderNow(i)}>Move now</button>
+              <button className="danger" onClick={() => remove(i)}>
+                Remove
+              </button>
+            </div>
+          </div>
+
+          <Field label="Label" help="A name you'll recognise.">
+            <input
+              placeholder="Downloads sorter"
+              value={rule.label}
+              onChange={(e) => update(i, { label: e.target.value })}
+            />
+          </Field>
+
+          <Field label="Watch folder" help="FileFlow moves new files that land here.">
+            <div className="row">
+              <input
+                placeholder="~/Downloads/Incoming"
+                value={rule.watch}
+                onChange={(e) => update(i, { watch: e.target.value })}
+              />
+              <button
+                onClick={async () => {
+                  const dir = await pickFolder();
+                  if (dir) update(i, { watch: dir });
+                }}
+              >
+                Choose…
+              </button>
+            </div>
+          </Field>
+
+          <DestField
+            value={rule.dest}
+            onChange={(v) => update(i, { dest: v })}
+            help="Where files are moved — a folder on this Mac, a cloud folder, a network share, or an external drive."
+          />
+
+          <Field
+            label="Folder structure"
+            help="Subfolders created at the destination. Tokens: {year}, {date}. Leave blank to move files in flat."
+          >
+            <input
+              placeholder="{year}/{date}"
+              value={rule.layout}
+              onChange={(e) => update(i, { layout: e.target.value })}
+            />
+          </Field>
+          <p className="preview">
+            Example: <code>{folderExample(rule.layout)}</code>
+          </p>
+
+          <CsvField
+            label="File types"
+            help="Comma-separated extensions to move. Leave blank to move everything."
+            placeholder="jpg, pdf, zip"
+            value={rule.extensions}
+            onChange={(v) => update(i, { extensions: v })}
+          />
+        </div>
+      ))}
+    </section>
   );
 }
 

@@ -116,6 +116,7 @@ pub fn run() {
             commands::run_ingest_now,
             commands::start_photos_import,
             commands::run_photos_import_now,
+            commands::run_folder_now,
             commands::get_activity,
             commands::dest_writable,
             commands::get_paused,

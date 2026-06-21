@@ -7,6 +7,7 @@
 
 pub mod config;
 pub mod error;
+pub mod folder;
 pub mod ingest;
 pub mod layout;
 pub mod photos;
