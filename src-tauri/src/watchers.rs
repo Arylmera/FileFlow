@@ -251,10 +251,7 @@ fn handle_volume(app: &AppHandle, volume_root: &Path) {
                 dates,
             },
         );
-        if let Some(w) = app.get_webview_window("main") {
-            let _ = w.show();
-            let _ = w.set_focus();
-        }
+        crate::show_main(app);
         return;
     }
 
@@ -325,10 +322,7 @@ pub fn run_photos_flow(app: &AppHandle) {
             return;
         }
         let _ = app.emit("photos-ready", PhotosReady { dates });
-        if let Some(w) = app.get_webview_window("main") {
-            let _ = w.show();
-            let _ = w.set_focus();
-        }
+        crate::show_main(app);
         return;
     }
     do_photos_import(app, &lr, &files, &BTreeMap::new());

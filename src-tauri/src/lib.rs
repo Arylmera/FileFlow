@@ -9,8 +9,9 @@ use tauri::{
     Emitter, Manager, WindowEvent,
 };
 
-fn show_main(app: &tauri::AppHandle) {
+pub(crate) fn show_main(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize(); // a minimized window won't come back with show() alone
         let _ = w.show();
         let _ = w.set_focus();
     }
@@ -30,6 +31,11 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // Menu-bar agent: no Dock icon. LSUIElement in Info.plist isn't always
+            // honoured for ad-hoc builds, so enforce it at runtime too.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             let show = MenuItem::with_id(app, "show", "Open FileFlow", true, None::<&str>)?;
             let import_lr =
                 MenuItem::with_id(app, "import_lr", "Import Lightroom now", true, None::<&str>)?;
