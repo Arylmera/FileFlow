@@ -5,7 +5,7 @@
 
 use crate::state::{ActivityEntry, AppState};
 use crate::volume;
-use fileflow_core::config::{AlbumMode, CardRule, CleanupPolicy, EjectPolicy};
+use fileflow_core::config::{AlbumMode, CardRule, CleanupPolicy, EjectPolicy, LightroomRule};
 use fileflow_core::ingest::{self, DateGroup};
 use fileflow_core::photos;
 use notify::{RecursiveMode, Watcher};
@@ -29,6 +29,11 @@ struct CardReady {
     uuid: String,
     label: String,
     volume_root: PathBuf,
+    dates: Vec<DateGroup>,
+}
+
+#[derive(Clone, Serialize)]
+struct PhotosReady {
     dates: Vec<DateGroup>,
 }
 
@@ -232,28 +237,63 @@ pub fn run_card_ingest(
     }
 }
 
-/// Scan the export folder and import new files into Photos. Public for the Phase 4 trigger.
+/// Export-flow entry point: prompt for names if configured, otherwise import now.
 pub fn run_photos_flow(app: &AppHandle) {
     let Some(lr) = app.state::<AppState>().snapshot().lightroom else {
         return;
     };
-    let folder = ingest::expand(&lr.watch_folder);
-    let files = photos::scan_folder(&folder, &lr.extensions);
+    let files = photos::scan_folder(&ingest::expand(&lr.watch_folder), &lr.extensions);
     if files.is_empty() {
         return;
     }
+    // By-date album with a name prompt → hand the dates to the UI naming form.
+    if lr.album_mode == AlbumMode::Template && lr.prompt_name {
+        let dates = photos::date_groups(&files);
+        if dates.is_empty() {
+            return;
+        }
+        let _ = app.emit("photos-ready", PhotosReady { dates });
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+        return;
+    }
+    do_photos_import(app, &lr, &files, &BTreeMap::new());
+}
+
+/// Import the watched export folder with a date→name map (the confirmed naming form).
+pub fn run_photos_import_named(app: &AppHandle, names: &BTreeMap<String, String>) {
+    let Some(lr) = app.state::<AppState>().snapshot().lightroom else {
+        return;
+    };
+    let files = photos::scan_folder(&ingest::expand(&lr.watch_folder), &lr.extensions);
+    if !files.is_empty() {
+        do_photos_import(app, &lr, &files, names);
+    }
+}
+
+fn do_photos_import(
+    app: &AppHandle,
+    lr: &LightroomRule,
+    files: &[PathBuf],
+    names: &BTreeMap<String, String>,
+) {
     let target = match lr.album_mode {
         AlbumMode::Library => photos::AlbumTarget::Library,
         AlbumMode::Fixed => photos::AlbumTarget::Fixed(lr.photos_album.clone()),
-        AlbumMode::Template => photos::AlbumTarget::Template(lr.photos_album.clone()),
+        AlbumMode::Template => photos::AlbumTarget::Template {
+            template: lr.photos_album.clone(),
+            names: names.clone(),
+        },
     };
-    match photos::import_to_photos(&files, &target, lr.skip_duplicates) {
+    match photos::import_to_photos(files, &target, lr.skip_duplicates) {
         Ok(rep) => {
             let msg = format!("imported {} file(s) → {}", rep.imported, rep.album);
             notify(app, "FileFlow — Photos", &msg);
             emit_activity(app, "photos", &msg);
             let archive = ingest::expand(&lr.archive_folder);
-            if let Err(e) = photos::after_import(&files, lr.after_import, &archive) {
+            if let Err(e) = photos::after_import(files, lr.after_import, &archive) {
                 emit_activity(app, "photos", &format!("after-import error: {e}"));
             }
         }

@@ -95,9 +95,17 @@ pub fn run_ingest_now(
     Ok(())
 }
 
+/// Trigger the export flow: prompts for names (emits `photos-ready`) if configured,
+/// otherwise imports immediately.
 #[tauri::command]
-pub fn run_photos_import_now(app: AppHandle) {
+pub fn start_photos_import(app: AppHandle) {
     std::thread::spawn(move || watchers::run_photos_flow(&app));
+}
+
+/// Import the watched export folder with a date→name map (the confirmed naming form).
+#[tauri::command]
+pub fn run_photos_import_now(app: AppHandle, names: BTreeMap<String, String>) {
+    std::thread::spawn(move || watchers::run_photos_import_named(&app, &names));
 }
 
 #[tauri::command]

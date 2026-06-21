@@ -165,12 +165,30 @@ fn album_groups_split_by_date_template() {
     write_file(&b, b"x", DAY_A);
     write_file(&c, b"x", DAY_B);
 
-    let by_date = album_groups(&[a.clone(), b.clone(), c.clone()], "{date}");
+    let by_date = album_groups(&[a.clone(), b.clone(), c.clone()], "{date}", &BTreeMap::new());
     assert_eq!(by_date.len(), 2, "two distinct capture dates → two albums");
     assert_eq!(by_date.values().map(|v| v.len()).sum::<usize>(), 3);
 
-    let by_year = album_groups(&[a, b, c], "{year}");
+    let by_year = album_groups(&[a, b, c], "{year}", &BTreeMap::new());
     assert_eq!(by_year.len(), 1, "same year → one album");
+}
+
+#[test]
+fn album_groups_fills_name_token() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = dir.path().join("a.jpg");
+    write_file(&a, b"x", DAY_A);
+    let (_, date) = fileflow_core::layout::date_parts(
+        std::time::UNIX_EPOCH + std::time::Duration::from_secs(DAY_A as u64),
+    );
+    let mut names = BTreeMap::new();
+    names.insert(date.clone(), "Holiday".to_string());
+
+    let groups = album_groups(&[a], "{date} {name}", &names);
+    assert!(
+        groups.contains_key(&format!("{date} Holiday")),
+        "album name uses the {{date}} {{name}} pattern"
+    );
 }
 
 #[test]

@@ -1,6 +1,7 @@
 //! Apple Photos import via `osascript`. (PhotoKit Swift sidecar is a future upgrade, §14.)
 
 use crate::config::AfterImport;
+use crate::ingest::DateGroup;
 use crate::util::{ext_matches, is_hidden};
 use crate::{layout, Error, Result};
 use std::collections::BTreeMap;
@@ -79,23 +80,46 @@ pub enum AlbumTarget {
     /// One fixed album.
     Fixed(String),
     /// Album name(s) rendered from a date template, grouped by each file's capture date.
-    Template(String),
+    /// `names` maps `YYYY-MM-DD` → the `{name}` token (empty when not prompted).
+    Template {
+        template: String,
+        names: BTreeMap<String, String>,
+    },
+}
+
+/// Distinct capture dates (from mtime) across a flat file list, for the naming form.
+pub fn date_groups(files: &[PathBuf]) -> Vec<DateGroup> {
+    let mut map: BTreeMap<(String, String), usize> = BTreeMap::new(); // (date, year) -> count
+    for f in files {
+        if let Ok(mtime) = std::fs::metadata(f).and_then(|m| m.modified()) {
+            let (year, date) = layout::date_parts(mtime);
+            *map.entry((date, year)).or_default() += 1;
+        }
+    }
+    map.into_iter()
+        .map(|((date, year), file_count)| DateGroup { date, year, file_count })
+        .collect()
 }
 
 /// Group files by the album name a date template renders for each file's mtime.
-/// Mirrors the card folder rules ({year}/{date}); {name} renders empty here.
-pub fn album_groups(files: &[PathBuf], template: &str) -> BTreeMap<String, Vec<PathBuf>> {
+/// Mirrors the card folder rules: {year}/{date}, with {name} from the `names` map.
+pub fn album_groups(
+    files: &[PathBuf],
+    template: &str,
+    names: &BTreeMap<String, String>,
+) -> BTreeMap<String, Vec<PathBuf>> {
     let mut groups: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
     for f in files {
-        let name = match std::fs::metadata(f).and_then(|m| m.modified()) {
+        let album = match std::fs::metadata(f).and_then(|m| m.modified()) {
             Ok(mtime) => {
                 let (year, date) = layout::date_parts(mtime);
-                layout::render(template, &year, &date, "")
+                let name = names.get(&date).cloned().unwrap_or_default();
+                layout::render(template, &year, &date, &name)
             }
             Err(_) => template.to_string(),
         };
-        let name = if name.is_empty() { "Imported".to_string() } else { name };
-        groups.entry(name).or_default().push(f.clone());
+        let album = if album.is_empty() { "Imported".to_string() } else { album };
+        groups.entry(album).or_default().push(f.clone());
     }
     groups
 }
@@ -130,13 +154,13 @@ pub fn import_to_photos(
             run_osascript(&build_import_script(files, Some(name), skip_duplicates))?;
             name.clone()
         }
-        AlbumTarget::Template(template) => {
-            let groups = album_groups(files, template);
-            let names: Vec<String> = groups.keys().cloned().collect();
-            for (name, group) in &groups {
-                run_osascript(&build_import_script(group, Some(name), skip_duplicates))?;
+        AlbumTarget::Template { template, names } => {
+            let groups = album_groups(files, template, names);
+            let albums: Vec<String> = groups.keys().cloned().collect();
+            for (album, group) in &groups {
+                run_osascript(&build_import_script(group, Some(album), skip_duplicates))?;
             }
-            format!("{} album(s): {}", names.len(), names.join(", "))
+            format!("{} album(s): {}", albums.len(), albums.join(", "))
         }
     };
     Ok(PhotosReport { imported: files.len(), album })

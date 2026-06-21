@@ -74,6 +74,11 @@ pub struct LightroomRule {
     /// Fixed album name (`Fixed`) or a date template (`Template`); ignored for `Library`.
     #[serde(default = "default_album")]
     pub photos_album: String,
+    /// Ask for a name before importing (used by the `Template` album mode's `{name}`).
+    #[serde(default)]
+    pub prompt_name: bool,
+    #[serde(default)]
+    pub name_mode: NameMode,
     #[serde(default = "default_true")]
     pub skip_duplicates: bool,
     #[serde(default)]

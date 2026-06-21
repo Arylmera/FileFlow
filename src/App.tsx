@@ -11,19 +11,26 @@ import type {
   CardRule,
   CleanupPolicy,
   Config,
+  DateGroup,
   EjectPolicy,
   LightroomRule,
   MountedCard,
   NameMode,
+  PhotosReady,
 } from "./api";
 import "./App.css";
 
 type Tab = "status" | "cards" | "lightroom" | "activity" | "settings";
 
+// A request to name an import, from either flow — drives the shared naming modal.
+type NamingReq =
+  | { kind: "card"; uuid: string; label: string; dates: DateGroup[] }
+  | { kind: "photos"; label: string; dates: DateGroup[] };
+
 const TABS: Tab[] = ["status", "cards", "lightroom", "activity", "settings"];
 const TAB_LABELS: Record<Tab, string> = {
   status: "Status",
-  cards: "Cards",
+  cards: "SD Card",
   lightroom: "Import to Photos",
   activity: "Activity",
   settings: "Settings",
@@ -55,16 +62,16 @@ function layoutExample(template: string): string {
 }
 
 /** A worked example of the album name a date template produces. */
-function albumExample(template: string): string {
-  const name = template
+function albumExample(template: string, name = ""): string {
+  const rendered = template
     .replace(/\{year\}/g, "2026")
     .replace(/\{date\}/g, "2026-06-20")
-    .replace(/\{name\}/g, "")
+    .replace(/\{name\}/g, name)
     .split("/")
     .map((s) => s.trim())
     .filter(Boolean)
     .join("/");
-  return name || "Imported";
+  return rendered || "Imported";
 }
 
 /** Labelled field with an example placeholder and a one-line "how to fill it" hint. */
@@ -100,12 +107,45 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+/**
+ * Comma-separated list editor. Keeps the raw typed text in local state so a trailing
+ * comma/space survives — normalizing on every keystroke would strip the separator and
+ * make it impossible to start a new entry.
+ */
+function CsvField({
+  label,
+  help,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  help?: string;
+  value: string[];
+  onChange: (v: string[]) => void;
+  placeholder?: string;
+}) {
+  const [text, setText] = useState(() => listToCsv(value));
+  return (
+    <Field label={label} help={help}>
+      <input
+        placeholder={placeholder}
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          onChange(csvToList(e.target.value));
+        }}
+      />
+    </Field>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>("status");
   const [config, setConfig] = useState<Config>(api.emptyConfig);
   const [dirty, setDirty] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
-  const [naming, setNaming] = useState<CardReady | null>(null);
+  const [naming, setNaming] = useState<NamingReq | null>(null);
 
   useEffect(() => {
     api.getConfig().then(setConfig);
@@ -113,7 +153,12 @@ export default function App() {
 
     const unlisten = [
       listen<ActivityEntry>("activity", (e) => setActivity((a) => [e.payload, ...a].slice(0, 200))),
-      listen<CardReady>("card-ready", (e) => setNaming(e.payload)),
+      listen<CardReady>("card-ready", (e) =>
+        setNaming({ kind: "card", uuid: e.payload.uuid, label: e.payload.label, dates: e.payload.dates }),
+      ),
+      listen<PhotosReady>("photos-ready", (e) =>
+        setNaming({ kind: "photos", label: "Import to Photos", dates: e.payload.dates }),
+      ),
     ];
     return () => {
       unlisten.forEach((u) => u.then((f) => f()));
@@ -162,10 +207,12 @@ export default function App() {
 
       {naming && (
         <NamingForm
-          card={naming}
+          req={naming}
           mode={
-            config.card.find((c) => c.uuid.toLowerCase() === naming.uuid.toLowerCase())?.name_mode ??
-            "per_date"
+            naming.kind === "card"
+              ? config.card.find((c) => c.uuid.toLowerCase() === naming.uuid.toLowerCase())
+                  ?.name_mode ?? "per_date"
+              : config.lightroom?.name_mode ?? "per_date"
           }
           onClose={() => setNaming(null)}
         />
@@ -180,7 +227,7 @@ function StatusView({
   onImported,
 }: {
   config: Config;
-  onNeedNames: (c: CardReady) => void;
+  onNeedNames: (r: NamingReq) => void;
   onImported: () => void;
 }) {
   const [cards, setCards] = useState<MountedCard[]>([]);
@@ -203,7 +250,7 @@ function StatusView({
     try {
       if (rule?.prompt_name) {
         const dates = await api.prepareIngest(uuid);
-        onNeedNames({ uuid, label: rule.label, volume_root: "", dates });
+        onNeedNames({ kind: "card", uuid, label: rule.label, dates });
       } else {
         await api.runIngestNow(uuid, {});
         onImported();
@@ -264,11 +311,11 @@ function StatusView({
 }
 
 function NamingForm({
-  card,
+  req,
   mode,
   onClose,
 }: {
-  card: CardReady;
+  req: NamingReq;
   mode: NameMode;
   onClose: () => void;
 }) {
@@ -286,24 +333,26 @@ function NamingForm({
   async function confirm() {
     const names: Record<string, string> =
       mode === "single"
-        ? Object.fromEntries(card.dates.map((d) => [d.date, single]))
+        ? Object.fromEntries(req.dates.map((d) => [d.date, single]))
         : perDate;
     try {
-      await api.runIngestNow(card.uuid, names);
+      if (req.kind === "card") await api.runIngestNow(req.uuid, names);
+      else await api.runPhotosImportNow(names);
       onClose();
     } catch (e) {
       alert(String(e));
     }
   }
 
-  const total = card.dates.reduce((n, d) => n + d.file_count, 0);
+  const total = req.dates.reduce((n, d) => n + d.file_count, 0);
+  const target = req.kind === "card" ? "destination folders" : "Photos albums";
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>Name this import</h2>
         <p className="subtitle">
-          {card.label} · {total} files. These names become the destination folders.
+          {req.label} · {total} files. These names become the {target}.
         </p>
         {mode === "single" ? (
           <Field label={`Name for all ${total} files`}>
@@ -315,7 +364,7 @@ function NamingForm({
             />
           </Field>
         ) : (
-          card.dates.map((d, i) => (
+          req.dates.map((d, i) => (
             <Field key={d.date} label={`${d.date} · ${d.file_count} files`}>
               <input
                 placeholder="e.g. Holiday"
@@ -347,7 +396,7 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
     <section>
       <header className="view-head">
         <div>
-          <h2>Cards</h2>
+          <h2>SD Card</h2>
           <p className="subtitle">
             Rules that run automatically when a recognised SD card is inserted.
           </p>
@@ -422,13 +471,13 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
                 }
               />
             </Field>
-            <Field label="File types" help="Comma-separated extensions to copy. Leave blank to copy everything.">
-              <input
-                placeholder="arw, jpg, mp4"
-                value={listToCsv(card.extensions)}
-                onChange={(e) => updateCard(i, { extensions: csvToList(e.target.value) })}
-              />
-            </Field>
+            <CsvField
+              label="File types"
+              help="Comma-separated extensions to copy. Leave blank to copy everything."
+              placeholder="arw, jpg, mp4"
+              value={card.extensions}
+              onChange={(v) => updateCard(i, { extensions: v })}
+            />
           </Group>
 
           <Group title="Where photos go">
@@ -585,9 +634,12 @@ function LightroomView({ config, patch }: { config: Config; patch: (p: Partial<C
           <h2>Import to Photos</h2>
           <p className="subtitle">New files in the watched folder are imported into Apple Photos.</p>
         </div>
-        <button className="danger" onClick={() => patch({ lightroom: null })}>
-          Disable
-        </button>
+        <div className="row">
+          <button onClick={() => api.startPhotosImport()}>Import now</button>
+          <button className="danger" onClick={() => patch({ lightroom: null })}>
+            Disable
+          </button>
+        </div>
       </header>
 
       <Group title="Source">
@@ -611,13 +663,13 @@ function LightroomView({ config, patch }: { config: Config; patch: (p: Partial<C
             </button>
           </div>
         </Field>
-        <Field label="File types" help="Comma-separated extensions to import.">
-          <input
-            placeholder="jpg, jpeg, tiff, heif"
-            value={listToCsv(lr.extensions)}
-            onChange={(e) => update({ extensions: csvToList(e.target.value) })}
-          />
-        </Field>
+        <CsvField
+          label="File types"
+          help="Comma-separated extensions to import."
+          placeholder="jpg, jpeg, tiff, heif"
+          value={lr.extensions}
+          onChange={(v) => update({ extensions: v })}
+        />
       </Group>
 
       <Group title="Into Photos">
@@ -644,17 +696,43 @@ function LightroomView({ config, patch }: { config: Config; patch: (p: Partial<C
           <>
             <Field
               label="Album name template"
-              help="Files are grouped into albums by capture date — same tokens as a card's folder structure: {year}, {date}."
+              help="Files are grouped into albums by date — same tokens as a card's folder structure: {year}, {date}, {name}."
             >
               <input
-                placeholder="{date}"
+                placeholder="{date} {name}"
                 value={lr.photos_album}
                 onChange={(e) => update({ photos_album: e.target.value })}
               />
             </Field>
             <p className="preview">
-              Example album: <code>{albumExample(lr.photos_album)}</code>
+              Example album:{" "}
+              <code>{albumExample(lr.photos_album, lr.prompt_name ? "Holiday" : "")}</code>
             </p>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={lr.prompt_name}
+                onChange={(e) => update({ prompt_name: e.target.checked })}
+              />
+              Ask me for a name before importing
+            </label>
+            <p className="help check-help">
+              Fills the {"{name}"} token — e.g. “{"{date} {name}"}” becomes “2026-06-20 Holiday”.
+            </p>
+            {lr.prompt_name && (
+              <Field
+                label="Naming"
+                help="One name for the whole import, or a separate name for each capture date."
+              >
+                <select
+                  value={lr.name_mode}
+                  onChange={(e) => update({ name_mode: e.target.value as NameMode })}
+                >
+                  <option value="per_date">A name per capture date</option>
+                  <option value="single">One name for everything</option>
+                </select>
+              </Field>
+            )}
           </>
         )}
         <label className="check">

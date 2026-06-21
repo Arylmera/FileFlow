@@ -24,6 +24,8 @@ export interface LightroomRule {
   watch_folder: string;
   album_mode: AlbumMode;
   photos_album: string;
+  prompt_name: boolean;
+  name_mode: NameMode;
   skip_duplicates: boolean;
   after_import: AfterImport;
   archive_folder: string;
@@ -69,6 +71,10 @@ export interface CardReady {
   dates: DateGroup[];
 }
 
+export interface PhotosReady {
+  dates: DateGroup[];
+}
+
 // Running outside the Tauri webview (e.g. a plain browser) has no IPC bridge;
 // loaders fall back to defaults so the shell still renders.
 const inTauri =
@@ -100,6 +106,8 @@ export function newLightroom(): LightroomRule {
     watch_folder: "",
     album_mode: "fixed",
     photos_album: "Lightroom",
+    prompt_name: false,
+    name_mode: "per_date",
     skip_duplicates: true,
     after_import: "archive",
     archive_folder: "",
@@ -123,7 +131,9 @@ export const listMountedCards = () => load<MountedCard[]>("list_mounted_cards", 
 export const prepareIngest = (uuid: string) => invoke<DateGroup[]>("prepare_ingest", { uuid });
 export const runIngestNow = (uuid: string, names: Record<string, string>) =>
   invoke<void>("run_ingest_now", { uuid, names });
-export const runPhotosImportNow = () => invoke<void>("run_photos_import_now");
+export const startPhotosImport = () => invoke<void>("start_photos_import");
+export const runPhotosImportNow = (names: Record<string, string>) =>
+  invoke<void>("run_photos_import_now", { names });
 export const getActivity = (limit: number) => load<ActivityEntry[]>("get_activity", { limit }, []);
 export const destWritable = (path: string) => load<boolean>("dest_writable", { path }, false);
 export const getPaused = () => load<boolean>("get_paused", {}, false);

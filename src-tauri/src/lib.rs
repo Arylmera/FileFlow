@@ -114,6 +114,7 @@ pub fn run() {
             commands::list_mounted_cards,
             commands::prepare_ingest,
             commands::run_ingest_now,
+            commands::start_photos_import,
             commands::run_photos_import_now,
             commands::get_activity,
             commands::dest_writable,
