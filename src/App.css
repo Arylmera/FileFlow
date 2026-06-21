@@ -355,7 +355,33 @@ button.danger:hover:not(:disabled) {
 }
 
 .card-head {
+  display: flex;
   align-items: flex-start;
+  gap: var(--s3);
+  cursor: pointer;
+  list-style: none; /* drop the native disclosure triangle for a custom chevron */
+}
+
+.card-head::-webkit-details-marker {
+  display: none;
+}
+
+.card-head::before {
+  content: "›";
+  flex: none;
+  font-size: 16px;
+  line-height: 1.3;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+details.card-edit[open] > .card-head::before {
+  transform: rotate(90deg);
+}
+
+/* push the action buttons to the right edge of the summary */
+.card-head > div:first-of-type {
+  margin-right: auto;
 }
 
 .card-sub {

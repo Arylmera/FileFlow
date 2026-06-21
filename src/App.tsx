@@ -426,16 +426,16 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
       )}
 
       {config.card.map((card, i) => (
-        <div key={i} className="card-edit">
-          <div className="row spread card-head">
+        <details key={i} className="card-edit" open>
+          <summary className="card-head">
             <div>
               <strong>{card.label || "Untitled drive"}</strong>
               {card.dest && <div className="card-sub muted">→ {card.dest}</div>}
             </div>
-            <button className="danger" onClick={() => removeCard(i)}>
+            <button className="danger" onClick={(e) => { e.preventDefault(); removeCard(i); }}>
               Remove
             </button>
-          </div>
+          </summary>
 
           <Group title="This drive">
             <Field label="Label" help="A name you'll recognise.">
@@ -566,7 +566,7 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
               </Field>
             </div>
           </Group>
-        </div>
+        </details>
       ))}
     </section>
   );
@@ -670,8 +670,8 @@ function FoldersView({ config, patch }: { config: Config; patch: (p: Partial<Con
       )}
 
       {config.folder.map((rule, i) => (
-        <div key={i} className="card-edit">
-          <div className="row spread card-head">
+        <details key={i} className="card-edit" open>
+          <summary className="card-head">
             <div>
               <strong>
                 {rule.label || (rule.kind === "photos" ? "Untitled import" : "Untitled folder")}
@@ -683,14 +683,14 @@ function FoldersView({ config, patch }: { config: Config; patch: (p: Partial<Con
               )}
             </div>
             <div className="row">
-              <button onClick={() => api.runFolderNow(i)}>
+              <button onClick={(e) => { e.preventDefault(); api.runFolderNow(i); }}>
                 {rule.kind === "photos" ? "Import now" : "Move now"}
               </button>
-              <button className="danger" onClick={() => remove(i)}>
+              <button className="danger" onClick={(e) => { e.preventDefault(); remove(i); }}>
                 Remove
               </button>
             </div>
-          </div>
+          </summary>
 
           <Field label="Label" help="A name you'll recognise.">
             <input
@@ -763,7 +763,7 @@ function FoldersView({ config, patch }: { config: Config; patch: (p: Partial<Con
           ) : (
             <PhotosDest rule={rule} update={(p) => update(i, p)} />
           )}
-        </div>
+        </details>
       ))}
     </section>
   );
