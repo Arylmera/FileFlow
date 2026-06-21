@@ -13,27 +13,26 @@ import type {
   Config,
   DateGroup,
   EjectPolicy,
+  FolderKind,
   FolderRule,
-  LightroomRule,
   MountedCard,
   NameMode,
   PhotosReady,
 } from "./api";
 import "./App.css";
 
-type Tab = "status" | "cards" | "folders" | "lightroom" | "activity" | "settings";
+type Tab = "status" | "cards" | "folders" | "activity" | "settings";
 
 // A request to name an import, from either flow — drives the shared naming modal.
 type NamingReq =
   | { kind: "card"; uuid: string; label: string; dates: DateGroup[] }
-  | { kind: "photos"; label: string; dates: DateGroup[] };
+  | { kind: "photos"; index: number; label: string; dates: DateGroup[] };
 
-const TABS: Tab[] = ["status", "cards", "folders", "lightroom", "activity", "settings"];
+const TABS: Tab[] = ["status", "cards", "folders", "activity", "settings"];
 const TAB_LABELS: Record<Tab, string> = {
   status: "Status",
   cards: "External Drive",
   folders: "Folders",
-  lightroom: "Import to Photos",
   activity: "Activity",
   settings: "Settings",
 };
@@ -172,7 +171,7 @@ export default function App() {
         setNaming({ kind: "card", uuid: e.payload.uuid, label: e.payload.label, dates: e.payload.dates }),
       ),
       listen<PhotosReady>("photos-ready", (e) =>
-        setNaming({ kind: "photos", label: "Import to Photos", dates: e.payload.dates }),
+        setNaming({ kind: "photos", index: e.payload.index, label: "Import to Photos", dates: e.payload.dates }),
       ),
     ];
     return () => {
@@ -216,7 +215,6 @@ export default function App() {
         )}
         {tab === "cards" && <CardsView config={config} patch={patchConfig} />}
         {tab === "folders" && <FoldersView config={config} patch={patchConfig} />}
-        {tab === "lightroom" && <LightroomView config={config} patch={patchConfig} />}
         {tab === "activity" && <ActivityView activity={activity} />}
         {tab === "settings" && <SettingsView config={config} patch={patchConfig} />}
       </main>
@@ -228,7 +226,7 @@ export default function App() {
             naming.kind === "card"
               ? config.card.find((c) => c.uuid.toLowerCase() === naming.uuid.toLowerCase())
                   ?.name_mode ?? "per_date"
-              : config.lightroom?.name_mode ?? "per_date"
+              : config.folder[naming.index]?.name_mode ?? "per_date"
           }
           onClose={() => setNaming(null)}
         />
@@ -353,7 +351,7 @@ function NamingForm({
         : perDate;
     try {
       if (req.kind === "card") await api.runIngestNow(req.uuid, names);
-      else await api.runPhotosImportNow(names);
+      else await api.runPhotosImportNow(req.index, names);
       onClose();
     } catch (e) {
       alert(String(e));
@@ -638,24 +636,36 @@ function FoldersView({ config, patch }: { config: Config; patch: (p: Partial<Con
   const update = (i: number, p: Partial<FolderRule>) =>
     patch({ folder: config.folder.map((r, j) => (j === i ? { ...r, ...p } : r)) });
   const remove = (i: number) => patch({ folder: config.folder.filter((_, j) => j !== i) });
-  const add = () => patch({ folder: [...config.folder, api.newFolder()] });
+  const addFolder = () => patch({ folder: [...config.folder, api.newFolder()] });
+  const addPhotos = () => patch({ folder: [...config.folder, api.newPhotosFolder()] });
+  // A rule loaded from disk only carries its own kind's fields; flipping kind
+  // backfills the other kind's defaults so its form fields are defined.
+  const flipKind = (i: number, kind: FolderKind) => {
+    const base = kind === "photos" ? api.newPhotosFolder() : api.newFolder();
+    update(i, { ...base, ...config.folder[i], kind });
+  };
 
   return (
     <section>
       <header className="view-head">
         <div>
-          <h2>Folder to Folder</h2>
+          <h2>Folders</h2>
           <p className="subtitle">
-            Watch a folder and move whatever lands in it into a dated destination.
+            Watch a folder and route new files — move them into a dated folder, or import them into Apple Photos.
           </p>
         </div>
-        <button onClick={add}>+ Add folder</button>
+        <div className="row">
+          <button onClick={addFolder}>+ To folder</button>
+          <button onClick={addPhotos}>+ To Photos</button>
+        </div>
       </header>
 
       {config.folder.length === 0 && (
         <div className="empty">
           <p>No folder rules yet.</p>
-          <p className="hint">Add a rule to auto-sort files dropped into a folder.</p>
+          <p className="hint">
+            Add a rule to auto-sort a folder, or import a Lightroom export into Photos.
+          </p>
         </div>
       )}
 
@@ -663,15 +673,19 @@ function FoldersView({ config, patch }: { config: Config; patch: (p: Partial<Con
         <div key={i} className="card-edit">
           <div className="row spread card-head">
             <div>
-              <strong>{rule.label || "Untitled folder"}</strong>
+              <strong>
+                {rule.label || (rule.kind === "photos" ? "Untitled import" : "Untitled folder")}
+              </strong>
               {rule.watch && (
                 <div className="card-sub muted">
-                  {rule.watch} → {rule.dest || "…"}
+                  {rule.watch} → {rule.kind === "photos" ? "Photos" : rule.dest || "…"}
                 </div>
               )}
             </div>
             <div className="row">
-              <button onClick={() => api.runFolderNow(i)}>Move now</button>
+              <button onClick={() => api.runFolderNow(i)}>
+                {rule.kind === "photos" ? "Import now" : "Move now"}
+              </button>
               <button className="danger" onClick={() => remove(i)}>
                 Remove
               </button>
@@ -680,16 +694,18 @@ function FoldersView({ config, patch }: { config: Config; patch: (p: Partial<Con
 
           <Field label="Label" help="A name you'll recognise.">
             <input
-              placeholder="Downloads sorter"
+              placeholder={rule.kind === "photos" ? "Lightroom exports" : "Downloads sorter"}
               value={rule.label}
               onChange={(e) => update(i, { label: e.target.value })}
             />
           </Field>
 
-          <Field label="Watch folder" help="FileFlow moves new files that land here.">
+          <Field label="Watch folder" help="FileFlow handles new files that land here.">
             <div className="row">
               <input
-                placeholder="~/Downloads/Incoming"
+                placeholder={
+                  rule.kind === "photos" ? "~/Pictures/Lightroom Exports" : "~/Downloads/Incoming"
+                }
                 value={rule.watch}
                 onChange={(e) => update(i, { watch: e.target.value })}
               />
@@ -704,108 +720,69 @@ function FoldersView({ config, patch }: { config: Config; patch: (p: Partial<Con
             </div>
           </Field>
 
-          <DestField
-            value={rule.dest}
-            onChange={(v) => update(i, { dest: v })}
-            help="Where files are moved — a folder on this Mac, a cloud folder, a network share, or an external drive."
-          />
-
-          <Field
-            label="Folder structure"
-            help="Subfolders created at the destination. Tokens: {year}, {date}. Leave blank to move files in flat."
-          >
-            <input
-              placeholder="{year}/{date}"
-              value={rule.layout}
-              onChange={(e) => update(i, { layout: e.target.value })}
-            />
+          <Field label="Destination" help="What to do with new files in this folder.">
+            <select value={rule.kind} onChange={(e) => flipKind(i, e.target.value as FolderKind)}>
+              <option value="folder">Move to a folder</option>
+              <option value="photos">Import into Apple Photos</option>
+            </select>
           </Field>
-          <p className="preview">
-            Example: <code>{folderExample(rule.layout)}</code>
-          </p>
 
           <CsvField
             label="File types"
-            help="Comma-separated extensions to move. Leave blank to move everything."
-            placeholder="jpg, pdf, zip"
+            help={
+              rule.kind === "photos"
+                ? "Comma-separated extensions to import. Leave blank to import everything."
+                : "Comma-separated extensions to move. Leave blank to move everything."
+            }
+            placeholder={rule.kind === "photos" ? "jpg, jpeg, tiff, heif" : "jpg, pdf, zip"}
             value={rule.extensions}
             onChange={(v) => update(i, { extensions: v })}
           />
+
+          {rule.kind === "folder" ? (
+            <>
+              <DestField
+                value={rule.dest}
+                onChange={(v) => update(i, { dest: v })}
+                help="Where files are moved — a folder on this Mac, a cloud folder, a network share, or an external drive."
+              />
+              <Field
+                label="Folder structure"
+                help="Subfolders created at the destination. Tokens: {year}, {date}. Leave blank to move files in flat."
+              >
+                <input
+                  placeholder="{year}/{date}"
+                  value={rule.layout}
+                  onChange={(e) => update(i, { layout: e.target.value })}
+                />
+              </Field>
+              <p className="preview">
+                Example: <code>{folderExample(rule.layout)}</code>
+              </p>
+            </>
+          ) : (
+            <PhotosDest rule={rule} update={(p) => update(i, p)} />
+          )}
         </div>
       ))}
     </section>
   );
 }
 
-function LightroomView({ config, patch }: { config: Config; patch: (p: Partial<Config>) => void }) {
-  const lr = config.lightroom;
-  const update = (p: Partial<LightroomRule>) =>
-    patch({ lightroom: { ...(lr as LightroomRule), ...p } });
-
-  if (!lr) {
-    return (
-      <section>
-        <h2>Import to Photos</h2>
-        <div className="empty">
-          <p>Not configured.</p>
-          <p className="hint">Watch an export folder and import new files into Apple Photos.</p>
-        </div>
-        <button className="primary" onClick={() => patch({ lightroom: api.newLightroom() })}>
-          Enable
-        </button>
-      </section>
-    );
-  }
-
+/** Photos-destination fields for a folder rule (kind = "photos"). */
+function PhotosDest({
+  rule,
+  update,
+}: {
+  rule: FolderRule;
+  update: (p: Partial<FolderRule>) => void;
+}) {
   return (
-    <section>
-      <header className="view-head">
-        <div>
-          <h2>Import to Photos</h2>
-          <p className="subtitle">New files in the watched folder are imported into Apple Photos.</p>
-        </div>
-        <div className="row">
-          <button onClick={() => api.startPhotosImport()}>Import now</button>
-          <button className="danger" onClick={() => patch({ lightroom: null })}>
-            Disable
-          </button>
-        </div>
-      </header>
-
-      <Group title="Source">
-        <Field
-          label="Watch folder"
-          help="FileFlow imports new files dropped here. Point Lightroom's export at this folder."
-        >
-          <div className="row">
-            <input
-              placeholder="~/Pictures/Lightroom Exports"
-              value={lr.watch_folder}
-              onChange={(e) => update({ watch_folder: e.target.value })}
-            />
-            <button
-              onClick={async () => {
-                const dir = await pickFolder();
-                if (dir) update({ watch_folder: dir });
-              }}
-            >
-              Choose…
-            </button>
-          </div>
-        </Field>
-        <CsvField
-          label="File types"
-          help="Comma-separated extensions to import."
-          placeholder="jpg, jpeg, tiff, heif"
-          value={lr.extensions}
-          onChange={(v) => update({ extensions: v })}
-        />
-      </Group>
-
+    <>
       <Group title="Into Photos">
         <Field label="Add to album" help="Where imported photos land in your Photos library.">
           <select
-            value={lr.album_mode}
+            value={rule.album_mode}
             onChange={(e) => update({ album_mode: e.target.value as AlbumMode })}
           >
             <option value="library">Library only — no album</option>
@@ -813,16 +790,16 @@ function LightroomView({ config, patch }: { config: Config; patch: (p: Partial<C
             <option value="template">An album named by date</option>
           </select>
         </Field>
-        {lr.album_mode === "fixed" && (
+        {rule.album_mode === "fixed" && (
           <Field label="Album name" help="Created if it doesn't already exist.">
             <input
               placeholder="Lightroom"
-              value={lr.photos_album}
+              value={rule.photos_album}
               onChange={(e) => update({ photos_album: e.target.value })}
             />
           </Field>
         )}
-        {lr.album_mode === "template" && (
+        {rule.album_mode === "template" && (
           <>
             <Field
               label="Album name template"
@@ -830,18 +807,18 @@ function LightroomView({ config, patch }: { config: Config; patch: (p: Partial<C
             >
               <input
                 placeholder="{date} {name}"
-                value={lr.photos_album}
+                value={rule.photos_album}
                 onChange={(e) => update({ photos_album: e.target.value })}
               />
             </Field>
             <p className="preview">
               Example album:{" "}
-              <code>{albumExample(lr.photos_album, lr.prompt_name ? "Holiday" : "")}</code>
+              <code>{albumExample(rule.photos_album, rule.prompt_name ? "Holiday" : "")}</code>
             </p>
             <label className="check">
               <input
                 type="checkbox"
-                checked={lr.prompt_name}
+                checked={rule.prompt_name}
                 onChange={(e) => update({ prompt_name: e.target.checked })}
               />
               Ask me for a name before importing
@@ -849,13 +826,13 @@ function LightroomView({ config, patch }: { config: Config; patch: (p: Partial<C
             <p className="help check-help">
               Fills the {"{name}"} token — e.g. “{"{date} {name}"}” becomes “2026-06-20 Holiday”.
             </p>
-            {lr.prompt_name && (
+            {rule.prompt_name && (
               <Field
                 label="Naming"
                 help="One name for the whole import, or a separate name for each capture date."
               >
                 <select
-                  value={lr.name_mode}
+                  value={rule.name_mode}
                   onChange={(e) => update({ name_mode: e.target.value as NameMode })}
                 >
                   <option value="per_date">A name per capture date</option>
@@ -868,7 +845,7 @@ function LightroomView({ config, patch }: { config: Config; patch: (p: Partial<C
         <label className="check">
           <input
             type="checkbox"
-            checked={lr.skip_duplicates}
+            checked={rule.skip_duplicates}
             onChange={(e) => update({ skip_duplicates: e.target.checked })}
           />
           Skip files already in my Photos library
@@ -878,7 +855,7 @@ function LightroomView({ config, patch }: { config: Config; patch: (p: Partial<C
       <Group title="After importing">
         <Field label="Exported files" help="What to do with the files once they're safely in Photos.">
           <select
-            value={lr.after_import}
+            value={rule.after_import}
             onChange={(e) => update({ after_import: e.target.value as AfterImport })}
           >
             <option value="leave">Leave them in place</option>
@@ -886,12 +863,12 @@ function LightroomView({ config, patch }: { config: Config; patch: (p: Partial<C
             <option value="delete">Delete them</option>
           </select>
         </Field>
-        {lr.after_import === "archive" && (
+        {rule.after_import === "archive" && (
           <Field label="Archive folder" help="Where imported files are moved.">
             <div className="row">
               <input
                 placeholder="~/Pictures/Lightroom Exports/_imported"
-                value={lr.archive_folder}
+                value={rule.archive_folder}
                 onChange={(e) => update({ archive_folder: e.target.value })}
               />
               <button
@@ -906,7 +883,7 @@ function LightroomView({ config, patch }: { config: Config; patch: (p: Partial<C
           </Field>
         )}
       </Group>
-    </section>
+    </>
   );
 }
 

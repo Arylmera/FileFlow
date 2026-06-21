@@ -6,6 +6,7 @@ export type CleanupPolicy = "ask" | "always" | "never";
 export type EjectPolicy = "never" | "ask" | "always";
 export type AfterImport = "archive" | "delete" | "leave";
 export type AlbumMode = "library" | "fixed" | "template";
+export type FolderKind = "folder" | "photos";
 
 export interface CardRule {
   uuid: string;
@@ -20,37 +21,37 @@ export interface CardRule {
   extensions: string[];
 }
 
-export interface LightroomRule {
-  watch_folder: string;
-  album_mode: AlbumMode;
-  photos_album: string;
-  prompt_name: boolean;
-  name_mode: NameMode;
-  skip_duplicates: boolean;
-  after_import: AfterImport;
-  archive_folder: string;
-  extensions: string[];
-}
-
 export interface AppSettings {
   autostart: boolean;
   keep_running_on_close: boolean;
   log_level: string;
 }
 
+// A watched-folder rule: move new files to a folder (`kind: "folder"`) or import
+// them into Photos (`kind: "photos"`). Fields not used by a kind are ignored.
 export interface FolderRule {
   label: string;
   watch: string;
+  kind: FolderKind;
+  extensions: string[];
+  // Folder destination
   dest: string;
   layout: string;
-  extensions: string[];
+  // Photos destination
+  album_mode: AlbumMode;
+  photos_album: string;
+  skip_duplicates: boolean;
+  after_import: AfterImport;
+  archive_folder: string;
+  // Shared naming (Photos "template" album mode)
+  prompt_name: boolean;
+  name_mode: NameMode;
 }
 
 // Note: `card`/`folder` (singular) — serde keeps the TOML table names over IPC.
 export interface Config {
   card: CardRule[];
   folder: FolderRule[];
-  lightroom: LightroomRule | null;
   app: AppSettings;
 }
 
@@ -82,6 +83,7 @@ export interface CardReady {
 }
 
 export interface PhotosReady {
+  index: number;
   dates: DateGroup[];
 }
 
@@ -93,12 +95,43 @@ const inTauri =
 export const emptyConfig: Config = {
   card: [],
   folder: [],
-  lightroom: null,
   app: { autostart: true, keep_running_on_close: true, log_level: "info" },
 };
 
+// Shared defaults for the per-kind fields a rule doesn't use.
+const folderDefaults = {
+  album_mode: "fixed" as AlbumMode,
+  photos_album: "Lightroom",
+  skip_duplicates: true,
+  after_import: "leave" as AfterImport,
+  archive_folder: "",
+  prompt_name: false,
+  name_mode: "per_date" as NameMode,
+};
+
 export function newFolder(): FolderRule {
-  return { label: "", watch: "", dest: "", layout: "{year}/{date}", extensions: [] };
+  return {
+    label: "",
+    watch: "",
+    kind: "folder",
+    extensions: [],
+    dest: "",
+    layout: "{year}/{date}",
+    ...folderDefaults,
+  };
+}
+
+export function newPhotosFolder(): FolderRule {
+  return {
+    label: "",
+    watch: "",
+    kind: "photos",
+    extensions: ["jpg", "jpeg", "tiff", "heif"],
+    dest: "",
+    layout: "{year}/{date}",
+    ...folderDefaults,
+    after_import: "archive",
+  };
 }
 
 export function newCard(): CardRule {
@@ -113,20 +146,6 @@ export function newCard(): CardRule {
     cleanup: "ask",
     eject: "never",
     extensions: ["arw", "jpg"],
-  };
-}
-
-export function newLightroom(): LightroomRule {
-  return {
-    watch_folder: "",
-    album_mode: "fixed",
-    photos_album: "Lightroom",
-    prompt_name: false,
-    name_mode: "per_date",
-    skip_duplicates: true,
-    after_import: "archive",
-    archive_folder: "",
-    extensions: ["jpg", "jpeg", "tiff", "heif"],
   };
 }
 
@@ -147,9 +166,8 @@ export const prepareIngest = (uuid: string) => invoke<DateGroup[]>("prepare_inge
 export const runIngestNow = (uuid: string, names: Record<string, string>) =>
   invoke<void>("run_ingest_now", { uuid, names });
 export const runFolderNow = (index: number) => invoke<void>("run_folder_now", { index });
-export const startPhotosImport = () => invoke<void>("start_photos_import");
-export const runPhotosImportNow = (names: Record<string, string>) =>
-  invoke<void>("run_photos_import_now", { names });
+export const runPhotosImportNow = (index: number, names: Record<string, string>) =>
+  invoke<void>("run_photos_import_now", { index, names });
 export const getActivity = (limit: number) => load<ActivityEntry[]>("get_activity", { limit }, []);
 export const destWritable = (path: string) => load<boolean>("dest_writable", { path }, false);
 export const getPaused = () => load<boolean>("get_paused", {}, false);

@@ -38,7 +38,7 @@ pub fn run() {
 
             let show = MenuItem::with_id(app, "show", "Open FileFlow", true, None::<&str>)?;
             let import_lr =
-                MenuItem::with_id(app, "import_lr", "Import Lightroom now", true, None::<&str>)?;
+                MenuItem::with_id(app, "import_lr", "Import to Photos now", true, None::<&str>)?;
             let pause =
                 MenuItem::with_id(app, "toggle_pause", "Pause / Resume watchers", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -55,7 +55,14 @@ pub fn run() {
                     "show" => show_main(app),
                     "import_lr" => {
                         let a = app.clone();
-                        std::thread::spawn(move || watchers::run_photos_flow(&a));
+                        std::thread::spawn(move || {
+                            let folders = a.state::<state::AppState>().snapshot().folders;
+                            for (i, r) in folders.iter().enumerate() {
+                                if r.is_photos() {
+                                    watchers::run_now(&a, i);
+                                }
+                            }
+                        });
                     }
                     "toggle_pause" => {
                         let st = app.state::<state::AppState>();
@@ -104,7 +111,7 @@ pub fn run() {
 
             app.manage(state::AppState::new(config, config_path));
 
-            // File-system watchers: card ingest (/Volumes) + Lightroom export folder.
+            // File-system watchers: card ingest (/Volumes) + per-rule folder watchers.
             watchers::start(app)?;
             Ok(())
         })
@@ -129,7 +136,6 @@ pub fn run() {
             commands::list_mounted_cards,
             commands::prepare_ingest,
             commands::run_ingest_now,
-            commands::start_photos_import,
             commands::run_photos_import_now,
             commands::run_folder_now,
             commands::get_activity,

@@ -208,9 +208,11 @@ fn folder_rule(watch: &str, dest: &str) -> FolderRule {
     FolderRule {
         label: "t".into(),
         watch: watch.into(),
-        dest: dest.into(),
-        layout: "{date}".into(),
         extensions: vec![],
+        target: fileflow_core::config::Destination::Folder {
+            dest: dest.into(),
+            layout: "{date}".into(),
+        },
     }
 }
 

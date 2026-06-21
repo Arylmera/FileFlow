@@ -11,23 +11,63 @@ pub struct Config {
     #[serde(rename = "folder", default)]
     pub folders: Vec<FolderRule>,
     #[serde(default)]
-    pub lightroom: Option<LightroomRule>,
-    #[serde(default)]
     pub app: AppSettings,
 }
 
-/// Watch a folder and move whatever lands in it into a dated destination.
+/// A watched folder and what to do with new files that land in it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FolderRule {
     #[serde(default)]
     pub label: String,
     pub watch: String,
-    pub dest: String,
-    #[serde(default = "default_folder_layout")]
-    pub layout: String,
-    /// Empty = move all file types.
+    /// Empty = handle all file types.
     #[serde(default)]
     pub extensions: Vec<String>,
+    /// Destination. Flattened so `kind` and its fields sit at the rule's top level
+    /// (e.g. `kind = "photos"` beside `album_mode`), keeping each rule to only the
+    /// fields its kind actually uses.
+    #[serde(flatten)]
+    pub target: Destination,
+}
+
+impl FolderRule {
+    pub fn is_photos(&self) -> bool {
+        matches!(self.target, Destination::Photos { .. })
+    }
+}
+
+/// Where a folder rule's new files go. The `kind` tag (`folder` | `photos`) selects
+/// the variant, and only that variant's fields are (de)serialized.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Destination {
+    /// Move files into `dest/{layout}/…`.
+    Folder {
+        /// Destination root for the move. Any writable path.
+        #[serde(default)]
+        dest: String,
+        #[serde(default = "default_folder_layout")]
+        layout: String,
+    },
+    /// Import files into Apple Photos.
+    Photos {
+        #[serde(default)]
+        album_mode: AlbumMode,
+        /// Fixed album name (`Fixed`) or a date template (`Template`); ignored for `Library`.
+        #[serde(default = "default_album")]
+        photos_album: String,
+        #[serde(default = "default_true")]
+        skip_duplicates: bool,
+        #[serde(default)]
+        after_import: AfterImport,
+        #[serde(default)]
+        archive_folder: String,
+        /// Ask for a name before importing (fills the `{name}` token).
+        #[serde(default)]
+        prompt_name: bool,
+        #[serde(default)]
+        name_mode: NameMode,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,29 +120,6 @@ pub enum EjectPolicy {
     Never,
     Ask,
     Always,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LightroomRule {
-    pub watch_folder: String,
-    #[serde(default)]
-    pub album_mode: AlbumMode,
-    /// Fixed album name (`Fixed`) or a date template (`Template`); ignored for `Library`.
-    #[serde(default = "default_album")]
-    pub photos_album: String,
-    /// Ask for a name before importing (used by the `Template` album mode's `{name}`).
-    #[serde(default)]
-    pub prompt_name: bool,
-    #[serde(default)]
-    pub name_mode: NameMode,
-    #[serde(default = "default_true")]
-    pub skip_duplicates: bool,
-    #[serde(default)]
-    pub after_import: AfterImport,
-    #[serde(default)]
-    pub archive_folder: String,
-    #[serde(default)]
-    pub extensions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -183,5 +200,45 @@ impl Config {
         let text = toml::to_string_pretty(self).map_err(|e| Error::Config(e.to_string()))?;
         std::fs::write(path, text)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn folder_rule_kinds_roundtrip_with_only_their_own_fields() {
+        let toml = r#"
+            [[folder]]
+            label = "Downloads"
+            watch = "~/Downloads/Incoming"
+            kind = "folder"
+            dest = "~/Pictures/Imports"
+            layout = "{year}/{date}"
+
+            [[folder]]
+            label = "Import to Photos"
+            watch = "~/Pictures/Exports"
+            kind = "photos"
+            album_mode = "library"
+            archive_folder = "~/Pictures/Exports/_done"
+            after_import = "archive"
+        "#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.folders.len(), 2);
+        assert!(matches!(cfg.folders[0].target, Destination::Folder { .. }));
+        let Destination::Photos { album_mode, after_import, .. } = &cfg.folders[1].target else {
+            panic!("second rule is Photos");
+        };
+        assert_eq!(*album_mode, AlbumMode::Library);
+        assert_eq!(*after_import, AfterImport::Archive);
+
+        // A folder rule serializes with no Photos fields, and vice versa.
+        let out = toml::to_string_pretty(&cfg).unwrap();
+        let folder_block = out.split("[[folder]]").nth(1).unwrap();
+        assert!(!folder_block.contains("album_mode"), "folder rule has no photos fields:\n{out}");
+        let photos_block = out.split("[[folder]]").nth(2).unwrap();
+        assert!(!photos_block.contains("dest ="), "photos rule has no folder fields:\n{out}");
     }
 }

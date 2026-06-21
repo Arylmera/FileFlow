@@ -1,7 +1,7 @@
 //! Folder-to-folder flow: watch a folder and move whatever lands in it into a
 //! dated destination — the card-ingest idea, triggered by a plain folder.
 
-use crate::config::FolderRule;
+use crate::config::{Destination, FolderRule};
 use crate::ingest::{expand, is_writable_dir};
 use crate::photos::scan_folder;
 use crate::util::move_file;
@@ -28,7 +28,10 @@ pub struct MoveReport {
 /// stub; same rule as card ingest). The scan is non-recursive, so a dest nested inside
 /// the watch folder won't re-trigger.
 pub fn run_folder_move(rule: &FolderRule) -> Result<MoveReport> {
-    let dest_root = expand(&rule.dest);
+    let Destination::Folder { dest, layout } = &rule.target else {
+        return Ok(MoveReport::default()); // not a folder-move rule — nothing to do
+    };
+    let dest_root = expand(dest);
     if !is_writable_dir(&dest_root) {
         return Err(Error::DestUnavailable(dest_root));
     }
@@ -39,7 +42,7 @@ pub fn run_folder_move(rule: &FolderRule) -> Result<MoveReport> {
         let dir = match std::fs::metadata(&f).and_then(|m| m.modified()) {
             Ok(mtime) => {
                 let (year, date) = layout::date_parts(mtime);
-                dest_root.join(layout::render(&rule.layout, &year, &date, ""))
+                dest_root.join(layout::render(layout, &year, &date, ""))
             }
             Err(_) => dest_root.clone(),
         };

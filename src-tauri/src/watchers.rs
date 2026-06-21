@@ -5,7 +5,7 @@
 
 use crate::state::{ActivityEntry, AppState};
 use crate::volume;
-use fileflow_core::config::{AlbumMode, CardRule, CleanupPolicy, EjectPolicy, LightroomRule};
+use fileflow_core::config::{AlbumMode, CardRule, CleanupPolicy, Destination, EjectPolicy, FolderRule};
 use fileflow_core::folder;
 use fileflow_core::ingest::{self, DateGroup};
 use fileflow_core::photos;
@@ -22,7 +22,6 @@ use tauri_plugin_notification::NotificationExt;
 /// Kept in managed state purely to keep the watchers alive for the app's lifetime.
 struct WatcherHandles {
     _volumes: notify::RecommendedWatcher,
-    _export: Option<notify::RecommendedWatcher>,
     _folders: Vec<notify::RecommendedWatcher>,
 }
 
@@ -36,13 +35,14 @@ struct CardReady {
 
 #[derive(Clone, Serialize)]
 struct PhotosReady {
+    index: usize,
     dates: Vec<DateGroup>,
 }
 
-/// Set up both watchers and their worker threads. Call once, after [`AppState`] is managed.
+/// Set up the watchers and their worker threads. Call once, after [`AppState`] is managed.
 ///
-/// Note: the export watcher binds to the configured folder at startup; changing
-/// `lightroom.watch_folder` later needs an app restart to re-bind (revisited in Phase 5).
+/// Note: folder watchers bind to their configured paths at startup; adding, removing,
+/// or re-pointing a folder rule needs an app restart to re-bind.
 pub fn start(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
 
@@ -57,30 +57,7 @@ pub fn start(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         std::thread::spawn(move || volume_worker(h, vrx));
     }
 
-    // --- Lightroom export watcher (only if configured and present) ---
-    let export_watcher = {
-        let folder = app
-            .state::<AppState>()
-            .snapshot()
-            .lightroom
-            .as_ref()
-            .map(|l| ingest::expand(&l.watch_folder));
-        match folder {
-            Some(folder) if folder.is_dir() => {
-                let (etx, erx) = mpsc::channel::<()>();
-                let mut w = notify::recommended_watcher(move |_res| {
-                    let _ = etx.send(());
-                })?;
-                w.watch(&folder, RecursiveMode::NonRecursive)?;
-                let h = handle.clone();
-                std::thread::spawn(move || export_worker(h, erx));
-                Some(w)
-            }
-            _ => None,
-        }
-    };
-
-    // --- Folder-to-folder watchers (one per configured rule) ---
+    // --- Folder watchers (one per configured rule, either kind) ---
     let mut folder_watchers = Vec::new();
     for (i, rule) in app.state::<AppState>().snapshot().folders.iter().enumerate() {
         let folder = ingest::expand(&rule.watch);
@@ -99,7 +76,6 @@ pub fn start(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     app.manage(Mutex::new(WatcherHandles {
         _volumes: vol_watcher,
-        _export: export_watcher,
         _folders: folder_watchers,
     }));
     Ok(())
@@ -119,27 +95,7 @@ fn volume_worker(app: AppHandle, rx: mpsc::Receiver<()>) {
     }
 }
 
-/// Import after 3s of quiet (Lightroom writes a burst of files).
-fn export_worker(app: AppHandle, rx: mpsc::Receiver<()>) {
-    loop {
-        if rx.recv().is_err() {
-            break;
-        }
-        loop {
-            match rx.recv_timeout(Duration::from_secs(3)) {
-                Ok(()) => continue,
-                Err(RecvTimeoutError::Timeout) => break,
-                Err(RecvTimeoutError::Disconnected) => return,
-            }
-        }
-        if app.state::<AppState>().is_paused() {
-            continue;
-        }
-        run_photos_flow(&app);
-    }
-}
-
-/// Move after 3s of quiet, for the folder rule at `index`.
+/// Handle the folder rule at `index` after 3s of quiet (a Lightroom/Finder write burst).
 fn folder_worker(app: AppHandle, index: usize, rx: mpsc::Receiver<()>) {
     loop {
         if rx.recv().is_err() {
@@ -155,13 +111,25 @@ fn folder_worker(app: AppHandle, index: usize, rx: mpsc::Receiver<()>) {
         if app.state::<AppState>().is_paused() {
             continue;
         }
-        run_folder_flow(&app, index);
+        run_now(&app, index);
     }
 }
 
-/// Move the watched folder's contents into its dated destination. Public for the manual trigger.
-pub fn run_folder_flow(app: &AppHandle, index: usize) {
+/// Run the folder rule at `index`, dispatching on its destination kind. Public for
+/// the manual "Run now" trigger; a Photos rule with name-prompting surfaces the UI form.
+pub fn run_now(app: &AppHandle, index: usize) {
     let Some(rule) = app.state::<AppState>().snapshot().folders.get(index).cloned() else {
+        return;
+    };
+    match rule.target {
+        Destination::Folder { .. } => run_folder_move(app, &rule),
+        Destination::Photos { .. } => run_photos_flow(app, index, &rule),
+    }
+}
+
+/// Move the watched folder's contents into its dated destination.
+fn run_folder_move(app: &AppHandle, rule: &FolderRule) {
+    let Destination::Folder { dest, .. } = &rule.target else {
         return;
     };
     let label = if rule.label.is_empty() {
@@ -169,7 +137,7 @@ pub fn run_folder_flow(app: &AppHandle, index: usize) {
     } else {
         rule.label.clone()
     };
-    match folder::run_folder_move(&rule) {
+    match folder::run_folder_move(rule) {
         Ok(report) => {
             if report.moved.is_empty() && report.failed.is_empty() {
                 return;
@@ -179,7 +147,7 @@ pub fn run_folder_flow(app: &AppHandle, index: usize) {
                 label,
                 report.moved.len(),
                 report.failed.len(),
-                rule.dest
+                dest
             );
             notify(app, "FileFlow — Folder move", &msg);
             emit_activity(app, "folder", &msg);
@@ -306,60 +274,71 @@ pub fn run_card_ingest(
     }
 }
 
-/// Export-flow entry point: prompt for names if configured, otherwise import now.
-pub fn run_photos_flow(app: &AppHandle) {
-    let Some(lr) = app.state::<AppState>().snapshot().lightroom else {
+/// Photos-flow entry point: prompt for names if configured, otherwise import now.
+fn run_photos_flow(app: &AppHandle, index: usize, rule: &FolderRule) {
+    let Destination::Photos { album_mode, prompt_name, .. } = &rule.target else {
         return;
     };
-    let files = photos::scan_folder(&ingest::expand(&lr.watch_folder), &lr.extensions);
+    let files = photos::scan_folder(&ingest::expand(&rule.watch), &rule.extensions);
     if files.is_empty() {
         return;
     }
     // By-date album with a name prompt → hand the dates to the UI naming form.
-    if lr.album_mode == AlbumMode::Template && lr.prompt_name {
+    if *album_mode == AlbumMode::Template && *prompt_name {
         let dates = photos::date_groups(&files);
         if dates.is_empty() {
             return;
         }
-        let _ = app.emit("photos-ready", PhotosReady { dates });
+        let _ = app.emit("photos-ready", PhotosReady { index, dates });
         crate::show_main(app);
         return;
     }
-    do_photos_import(app, &lr, &files, &BTreeMap::new());
+    do_photos_import(app, rule, &files, &BTreeMap::new());
 }
 
-/// Import the watched export folder with a date→name map (the confirmed naming form).
-pub fn run_photos_import_named(app: &AppHandle, names: &BTreeMap<String, String>) {
-    let Some(lr) = app.state::<AppState>().snapshot().lightroom else {
+/// Import the watched folder at `index` with a date→name map (the confirmed naming form).
+pub fn run_photos_import_named(app: &AppHandle, index: usize, names: &BTreeMap<String, String>) {
+    let Some(rule) = app.state::<AppState>().snapshot().folders.get(index).cloned() else {
         return;
     };
-    let files = photos::scan_folder(&ingest::expand(&lr.watch_folder), &lr.extensions);
+    let files = photos::scan_folder(&ingest::expand(&rule.watch), &rule.extensions);
     if !files.is_empty() {
-        do_photos_import(app, &lr, &files, names);
+        do_photos_import(app, &rule, &files, names);
     }
 }
 
 fn do_photos_import(
     app: &AppHandle,
-    lr: &LightroomRule,
+    rule: &FolderRule,
     files: &[PathBuf],
     names: &BTreeMap<String, String>,
 ) {
-    let target = match lr.album_mode {
+    let Destination::Photos {
+        album_mode,
+        photos_album,
+        skip_duplicates,
+        after_import,
+        archive_folder,
+        ..
+    } = &rule.target
+    else {
+        return;
+    };
+    let target = match album_mode {
         AlbumMode::Library => photos::AlbumTarget::Library,
-        AlbumMode::Fixed => photos::AlbumTarget::Fixed(lr.photos_album.clone()),
+        AlbumMode::Fixed => photos::AlbumTarget::Fixed(photos_album.clone()),
         AlbumMode::Template => photos::AlbumTarget::Template {
-            template: lr.photos_album.clone(),
+            template: photos_album.clone(),
             names: names.clone(),
         },
     };
-    match photos::import_to_photos(files, &target, lr.skip_duplicates) {
+    match photos::import_to_photos(files, &target, *skip_duplicates) {
         Ok(rep) => {
             let msg = format!("imported {} file(s) → {}", rep.imported, rep.album);
             notify(app, "FileFlow — Photos", &msg);
             emit_activity(app, "photos", &msg);
-            let archive = ingest::expand(&lr.archive_folder);
-            if let Err(e) = photos::after_import(files, lr.after_import, &archive) {
+            let archive = ingest::expand(archive_folder);
+            if let Err(e) = photos::after_import(files, *after_import, &archive) {
                 emit_activity(app, "photos", &format!("after-import error: {e}"));
             }
         }
