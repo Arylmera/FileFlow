@@ -160,6 +160,7 @@ pub fn run() {
             commands::run_photos_import_now,
             commands::run_folder_now,
             commands::get_activity,
+            commands::get_runs,
             commands::dest_writable,
             commands::get_paused,
             commands::set_paused,

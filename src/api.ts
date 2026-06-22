@@ -8,6 +8,13 @@ export type AfterImport = "archive" | "delete" | "leave";
 export type AlbumMode = "library" | "fixed" | "template";
 export type FolderKind = "folder" | "photos";
 
+// An extension→destination override within a card rule. Blank dest/layout reuse the rule's.
+export interface Route {
+  extensions: string[];
+  dest: string;
+  layout: string;
+}
+
 export interface CardRule {
   uuid: string;
   label: string;
@@ -19,6 +26,8 @@ export interface CardRule {
   cleanup: CleanupPolicy;
   eject: EjectPolicy;
   extensions: string[];
+  routes: Route[];
+  rename: string;
 }
 
 export interface AppSettings {
@@ -75,6 +84,21 @@ export interface ActivityEntry {
   flow: string;
   message: string;
   ts: string;
+}
+
+// One completed run of one rule — the durable history behind the Flow map.
+export interface RunRecord {
+  ts: string; // RFC3339
+  flow: string; // "drive" | "folder" | "photos"
+  rule_key: string; // "card:{uuid}" | "folder:{watch}"
+  label: string;
+  source: string;
+  dest: string;
+  ok: number;
+  skipped: number;
+  failed: number;
+  status: string; // "ok" | "partial" | "failed"
+  detail: string;
 }
 
 export interface CardReady {
@@ -155,6 +179,8 @@ export function newCard(): CardRule {
     cleanup: "ask",
     eject: "never",
     extensions: ["arw", "jpg"],
+    routes: [],
+    rename: "",
   };
 }
 
@@ -178,6 +204,7 @@ export const runFolderNow = (index: number) => invoke<void>("run_folder_now", { 
 export const runPhotosImportNow = (index: number, names: Record<string, string>) =>
   invoke<void>("run_photos_import_now", { index, names });
 export const getActivity = (limit: number) => load<ActivityEntry[]>("get_activity", { limit }, []);
+export const getRuns = (limit: number) => load<RunRecord[]>("get_runs", { limit }, []);
 export const destWritable = (path: string) => load<boolean>("dest_writable", { path }, false);
 export const getPaused = () => load<boolean>("get_paused", {}, false);
 export const setPaused = (paused: boolean) => invoke<void>("set_paused", { paused });

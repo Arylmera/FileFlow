@@ -19,19 +19,21 @@ import type {
   NameMode,
   PhotosReady,
   Progress,
+  Route,
 } from "./api";
 import "./App.css";
 
-type Tab = "status" | "cards" | "folders" | "activity" | "settings";
+type Tab = "flow" | "status" | "cards" | "folders" | "activity" | "settings";
 
 // A request to name an import, from either flow — drives the shared naming modal.
 type NamingReq =
   | { kind: "card"; uuid: string; label: string; dates: DateGroup[] }
   | { kind: "photos"; index: number; label: string; dates: DateGroup[] };
 
-const TABS: Tab[] = ["status", "cards", "folders", "activity", "settings"];
+const TABS: Tab[] = ["flow", "status", "cards", "folders", "activity", "settings"];
 const TAB_LABELS: Record<Tab, string> = {
-  status: "Status",
+  flow: "Flow",
+  status: "Devices",
   cards: "External Drive",
   folders: "Folders",
   activity: "Activity",
@@ -74,6 +76,20 @@ function folderExample(template: string): string {
     .filter(Boolean)
     .join("/");
   return folder ? `${folder}/file.jpg` : "file.jpg";
+}
+
+/** A worked example of the filename a rename template produces (extension always kept). */
+function filenameExample(template: string): string {
+  if (!template.trim()) return "DSC0001.ARW (unchanged)";
+  const stem =
+    template
+      .replace(/\{year\}/g, "2026")
+      .replace(/\{date\}/g, "2026-06-20")
+      .replace(/\{name\}/g, "Holiday")
+      .replace(/\{seq\}/g, "0001")
+      .replace(/\//g, "-")
+      .trim() || "0001";
+  return `${stem}.ARW`;
 }
 
 /** A worked example of the album name a date template produces. */
@@ -141,6 +157,14 @@ function CsvField({
   placeholder?: string;
 }) {
   const [text, setText] = useState(() => listToCsv(value));
+  // Re-seed when the external value diverges from what's typed — e.g. a list row is
+  // removed and React reuses this instance under an index key. Compared by content so an
+  // in-progress trailing comma/space (which parses to the same list) isn't clobbered.
+  const joined = value.join(",");
+  useEffect(() => {
+    if (csvToList(text).join(",") !== joined) setText(listToCsv(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [joined]);
   return (
     <Field label={label} help={help}>
       <input
@@ -156,7 +180,7 @@ function CsvField({
 }
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("status");
+  const [tab, setTab] = useState<Tab>("flow");
   const [config, setConfig] = useState<Config>(api.emptyConfig);
   const [dirty, setDirty] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
@@ -221,6 +245,9 @@ export default function App() {
       )}
 
       <main>
+        {tab === "flow" && (
+          <FlowView config={config} onNeedNames={setNaming} onNavigate={setTab} />
+        )}
         {tab === "status" && (
           <StatusView
             config={config}
@@ -247,6 +274,311 @@ export default function App() {
         />
       )}
     </div>
+  );
+}
+
+// --- Flow map --------------------------------------------------------------
+
+type LaneKind = "drive" | "photos" | "folder";
+
+interface Lane {
+  key: string; // matches the Rust rule_key, joins a rule to its runs
+  kind: LaneKind;
+  label: string;
+  source: string;
+  filter: string;
+  action: string;
+  dest: string;
+  detail: string; // layout token, album name, or "Library"
+  revealPath: string; // a real path to open in Finder (empty = no Reveal)
+  run: api.RunRecord | null; // most-recent run
+  routed: number; // cumulative files routed
+  cardUuid?: string;
+  folderIndex?: number;
+  promptName: boolean;
+}
+
+const fmtCount = (n: number) => n.toLocaleString();
+
+/** "just now" / "5m ago" / "3h ago" / "2d ago" / a date. */
+function relTime(ts: string): string {
+  const t = new Date(ts).getTime();
+  if (Number.isNaN(t)) return "";
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 45) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  if (s < 604800) return `${Math.round(s / 86400)}d ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+const laneFilter = (exts: string[]) => (exts.length ? exts.join(", ") : "all types");
+
+/** Project the config topology + run history into one lane per automation. */
+function buildLanes(config: Config, runs: api.RunRecord[]): Lane[] {
+  const byKey = new Map<string, api.RunRecord[]>();
+  for (const r of runs) {
+    const list = byKey.get(r.rule_key) ?? [];
+    list.push(r); // runs arrive most-recent-first
+    byKey.set(r.rule_key, list);
+  }
+  const attach = (key: string) => {
+    const list = byKey.get(key) ?? [];
+    return { run: list[0] ?? null, routed: list.reduce((n, r) => n + r.ok, 0) };
+  };
+
+  const lanes: Lane[] = [];
+
+  for (const c of config.card) {
+    const key = `card:${c.uuid}`;
+    const action = ["copy", "verify"];
+    if (c.cleanup !== "never") action.push("wipe");
+    lanes.push({
+      key,
+      kind: "drive",
+      label: c.label || "Untitled drive",
+      source: c.sources.join(", ") || "drive",
+      filter: laneFilter(c.extensions),
+      action: action.join(" · "),
+      dest: c.dest || "…",
+      detail: c.layout,
+      revealPath: c.dest,
+      cardUuid: c.uuid,
+      promptName: c.prompt_name,
+      ...attach(key),
+    });
+  }
+
+  config.folder.forEach((f, i) => {
+    const key = `folder:${f.watch}`;
+    if (f.kind === "photos") {
+      const after =
+        f.after_import === "archive" ? " · archive" : f.after_import === "delete" ? " · delete" : "";
+      lanes.push({
+        key,
+        kind: "photos",
+        label: f.label || "Untitled import",
+        source: f.watch || "…",
+        filter: laneFilter(f.extensions),
+        action: `import${after}`,
+        dest: "Apple Photos",
+        detail: f.album_mode === "library" ? "Library" : f.photos_album,
+        revealPath: f.watch,
+        folderIndex: i,
+        promptName: f.prompt_name,
+        ...attach(key),
+      });
+    } else {
+      lanes.push({
+        key,
+        kind: "folder",
+        label: f.label || "Untitled folder",
+        source: f.watch || "…",
+        filter: laneFilter(f.extensions),
+        action: "move",
+        dest: f.dest || "…",
+        detail: f.layout || "flat",
+        revealPath: f.dest,
+        folderIndex: i,
+        promptName: f.prompt_name,
+        ...attach(key),
+      });
+    }
+  });
+
+  return lanes;
+}
+
+function FlowView({
+  config,
+  onNeedNames,
+  onNavigate,
+}: {
+  config: Config;
+  onNeedNames: (r: NamingReq) => void;
+  onNavigate: (t: Tab) => void;
+}) {
+  const [runs, setRuns] = useState<api.RunRecord[]>([]);
+  const [mode, setMode] = useState<"map" | "history">("map");
+
+  useEffect(() => {
+    const refresh = () => api.getRuns(500).then(setRuns);
+    refresh();
+    const subs = [listen("run", refresh), listen("activity", refresh)];
+    return () => subs.forEach((u) => u.then((f) => f()));
+  }, []);
+
+  const lanes = buildLanes(config, runs);
+  const empty = config.card.length === 0 && config.folder.length === 0;
+
+  async function runLane(l: Lane) {
+    try {
+      if (l.kind === "drive" && l.cardUuid) {
+        if (l.promptName) {
+          const dates = await api.prepareIngest(l.cardUuid);
+          onNeedNames({ kind: "card", uuid: l.cardUuid, label: l.label, dates });
+        } else {
+          await api.runIngestNow(l.cardUuid, {});
+        }
+      } else if (l.folderIndex != null) {
+        // A Photos rule that prompts for a name surfaces the form via the photos-ready event.
+        await api.runFolderNow(l.folderIndex);
+      }
+    } catch (e) {
+      alert(String(e));
+    }
+  }
+
+  return (
+    <section>
+      <header className="view-head">
+        <div>
+          <h2>Flow</h2>
+          <p className="subtitle">
+            Every automation, from where files come from to where they land. Health and counts come
+            from each rule's last run.
+          </p>
+        </div>
+        <div className="seg" role="tablist">
+          <button className={mode === "map" ? "on" : ""} onClick={() => setMode("map")}>
+            Map
+          </button>
+          <button className={mode === "history" ? "on" : ""} onClick={() => setMode("history")}>
+            History
+          </button>
+        </div>
+      </header>
+
+      {empty ? (
+        <div className="empty">
+          <p>No automations yet.</p>
+          <p className="hint">Add a drive rule or a folder rule and it shows up here as a flow.</p>
+          <div className="row" style={{ marginTop: "var(--s3)" }}>
+            <button onClick={() => onNavigate("cards")}>+ Add drive</button>
+            <button onClick={() => onNavigate("folders")}>+ Add folder</button>
+          </div>
+        </div>
+      ) : mode === "map" ? (
+        <FlowMap lanes={lanes} onRun={runLane} />
+      ) : (
+        <RunHistory runs={runs} />
+      )}
+    </section>
+  );
+}
+
+function FlowMap({ lanes, onRun }: { lanes: Lane[]; onRun: (l: Lane) => void }) {
+  const filesRouted = lanes.reduce((n, l) => n + l.routed, 0);
+  const attention = lanes.filter((l) => l.run?.status === "failed").length;
+
+  return (
+    <>
+      <div className="flow-summary">
+        <div className="stat">
+          <span className="n">{lanes.length}</span>
+          <span className="l">Automations</span>
+        </div>
+        <div className="stat">
+          <span className="n">{fmtCount(filesRouted)}</span>
+          <span className="l">Files routed</span>
+        </div>
+        <div className="stat">
+          <span className={attention ? "n warnN" : "n"}>{attention}</span>
+          <span className="l">Needs attention</span>
+        </div>
+      </div>
+      <div className="lanes">
+        {lanes.map((l) => (
+          <LaneRow key={l.key} lane={l} onRun={onRun} />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function LaneRow({ lane, onRun }: { lane: Lane; onRun: (l: Lane) => void }) {
+  const health = lane.run?.status ?? "idle";
+  let healthText: string;
+  if (!lane.run) {
+    healthText = lane.kind === "drive" ? "Connect the drive to run" : "Watching · nothing routed yet";
+  } else if (health === "failed") {
+    healthText = lane.run.detail || "Last run failed";
+  } else {
+    const verb = lane.kind === "photos" ? "imported" : lane.kind === "drive" ? "synced" : "moved";
+    const noun = lane.routed === 1 ? "file" : "files";
+    const partial = health === "partial" ? " · last run had errors" : "";
+    healthText = `${fmtCount(lane.routed)} ${noun} ${verb}${partial} · ${relTime(lane.run.ts)}`;
+  }
+  const kindLabel = lane.kind === "drive" ? "Drive" : lane.kind === "photos" ? "Photos" : "Folder";
+
+  return (
+    <div className={`lane ${health}`}>
+      <div className="lane-node">
+        <span className={`badge ${lane.kind}`}>{kindLabel}</span>
+        <span className="lane-name">{lane.label}</span>
+        <span className="lane-meta">
+          {lane.source} · {lane.filter}
+        </span>
+      </div>
+      <div className="lane-mid">
+        <span className="lane-action">{lane.action}</span>
+        <span className="lane-line" aria-hidden="true" />
+      </div>
+      <div className="lane-node dst">
+        <span className="lane-name">{lane.dest}</span>
+        <span className="lane-meta">{lane.detail}</span>
+        <span className={`lane-health h-${health}`}>
+          <span className={`dot d-${health}`} />
+          {healthText}
+        </span>
+      </div>
+      <div className="lane-actions">
+        <button className="run" onClick={() => onRun(lane)}>
+          Run now
+        </button>
+        {lane.revealPath && (
+          <button onClick={() => api.revealInFinder(lane.revealPath).catch((e) => alert(String(e)))}>
+            Reveal
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RunHistory({ runs }: { runs: api.RunRecord[] }) {
+  if (runs.length === 0) {
+    return (
+      <div className="empty">
+        <p>No runs recorded yet.</p>
+        <p className="hint">Every completed import or move is logged here, with counts and outcome.</p>
+      </div>
+    );
+  }
+  return (
+    <ul className="log">
+      {runs.map((r, i) => {
+        const verb = r.flow === "photos" ? "imported" : r.flow === "drive" ? "copied" : "moved";
+        return (
+          <li key={i}>
+            <span className="ts">{relTime(r.ts)}</span>
+            <span className={`badge ${r.flow}`}>{r.flow}</span>
+            <span className="run-counts">
+              {r.status === "failed" ? (
+                <span className="run-fail">{r.detail}</span>
+              ) : (
+                <>
+                  {fmtCount(r.ok)} {verb}
+                  {r.skipped > 0 && ` · ${fmtCount(r.skipped)} skipped`}
+                  {r.failed > 0 && ` · ${fmtCount(r.failed)} failed`}
+                </>
+              )}
+              <span className="run-arrow"> → {r.dest}</span>
+            </span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -524,7 +856,25 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
             <p className="preview">
               Example: <code>{layoutExample(card.layout)}</code>
             </p>
+            <Field
+              label="Rename files (optional)"
+              help="Rename each file as it's copied. Tokens: {year}, {date}, {name}, {seq}. The original extension is always kept. Blank = keep original names."
+            >
+              <input
+                placeholder="{date}_{seq}"
+                value={card.rename}
+                onChange={(e) => updateCard(i, { rename: e.target.value })}
+              />
+            </Field>
+            <p className="preview">
+              Example: <code>{filenameExample(card.rename)}</code>
+            </p>
           </Group>
+
+          <RoutesEditor
+            routes={card.routes}
+            onChange={(routes) => updateCard(i, { routes })}
+          />
 
           <Group title="When a drive is connected">
             <label className="check">
@@ -584,6 +934,64 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
         </details>
       ))}
     </section>
+  );
+}
+
+/** Optional per-extension destination overrides for a card rule (RAW→A, JPG→B). */
+function RoutesEditor({
+  routes,
+  onChange,
+}: {
+  routes: Route[];
+  onChange: (r: Route[]) => void;
+}) {
+  const update = (i: number, p: Partial<Route>) =>
+    onChange(routes.map((r, j) => (j === i ? { ...r, ...p } : r)));
+  const add = () => onChange([...routes, { extensions: [], dest: "", layout: "" }]);
+  const remove = (i: number) => onChange(routes.filter((_, j) => j !== i));
+
+  return (
+    <Group title="Split by file type (optional)">
+      <p className="help">
+        Send some extensions to their own destination — e.g. RAW to an archive, JPG to a working
+        folder. Routes are tried top to bottom; the first match wins, and anything unmatched uses
+        the destination above. Leave a field blank to reuse the rule's.
+      </p>
+      {routes.map((r, i) => (
+        <div key={i} className="route-row">
+          <CsvField
+            label="File types"
+            placeholder="arw, raw"
+            value={r.extensions}
+            onChange={(v) => update(i, { extensions: v })}
+          />
+          <Field label="Destination" help="Blank = the destination above.">
+            <input
+              placeholder="~/Archive/RAW"
+              value={r.dest}
+              onChange={(e) => update(i, { dest: e.target.value })}
+            />
+          </Field>
+          <Field label="Folder structure" help="Blank = the structure above.">
+            <input
+              placeholder="{year}/{date}"
+              value={r.layout}
+              onChange={(e) => update(i, { layout: e.target.value })}
+            />
+          </Field>
+          <button
+            className="danger"
+            onClick={(e) => {
+              e.preventDefault();
+              remove(i);
+            }}
+          >
+            Remove route
+          </button>
+        </div>
+      ))}
+      <button onClick={(e) => { e.preventDefault(); add(); }}>+ Add route</button>
+    </Group>
   );
 }
 

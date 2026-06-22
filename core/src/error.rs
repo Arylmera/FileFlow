@@ -6,6 +6,11 @@ pub enum Error {
     #[error("destination unavailable or not writable: {0}")]
     DestUnavailable(PathBuf),
 
+    /// A destination resolved to a path inside the card being imported — refused so
+    /// cleanup can never delete the card's only copies. Pick a destination elsewhere.
+    #[error("destination is inside the card being imported: {0}")]
+    DestInsideCard(PathBuf),
+
     /// Cleanup refused: some files failed to copy, so the card is left untouched.
     #[error("cleanup blocked: {0} file(s) failed; card left untouched")]
     CleanupBlocked(usize),

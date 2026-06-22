@@ -1,4 +1,6 @@
-use fileflow_core::config::{AfterImport, CardRule, CleanupPolicy, EjectPolicy, FolderRule, NameMode};
+use fileflow_core::config::{
+    AfterImport, CardRule, CleanupPolicy, EjectPolicy, FolderRule, NameMode, Route,
+};
 use fileflow_core::folder::run_folder_move;
 use fileflow_core::ingest::{
     cleanup, plan_ingest, run_ingest, scan_dates, scan_files, FailedCopy, IngestReport,
@@ -20,7 +22,17 @@ fn rule(sources: &[&str], dest: &str, exts: &[&str]) -> CardRule {
         cleanup: CleanupPolicy::Ask,
         eject: EjectPolicy::Never,
         extensions: exts.iter().map(|s| s.to_string()).collect(),
+        rename: String::new(),
+        routes: vec![],
     }
+}
+
+/// Local date string (YYYY-MM-DD) for one of the fixed test mtimes, for asserting paths.
+fn day_of(unix_mtime: i64) -> String {
+    let (_, date) = layout::date_parts(
+        std::time::UNIX_EPOCH + std::time::Duration::from_secs(unix_mtime as u64),
+    );
+    date
 }
 
 fn write_file(path: &Path, bytes: &[u8], unix_mtime: i64) {
@@ -101,6 +113,232 @@ fn run_ingest_copies_verifies_and_is_idempotent() {
 }
 
 #[test]
+fn render_filename_fills_seq_and_keeps_extension() {
+    // {seq} is zero-padded to 4; the extension is appended, never templated.
+    assert_eq!(layout::render_filename("{date}_{seq}", "2026", "2026-06-20", "", 7, "arw"), "2026-06-20_0007.arw");
+    assert_eq!(layout::render_filename("{name}_{seq}", "2026", "2026-06-20", "Trip", 1, "jpg"), "Trip_0001.jpg");
+    // Path separators flatten to '-' (a filename has no folders).
+    assert_eq!(layout::render_filename("{year}/{seq}", "2026", "2026-06-20", "", 3, "arw"), "2026-0003.arw");
+    // A template that renders to nothing — or to a traversal name — falls back to the sequence.
+    assert_eq!(layout::render_filename("{name}", "2026", "2026-06-20", "", 5, "arw"), "0005.arw");
+    assert_eq!(layout::render_filename("{name}", "2026", "2026-06-20", "..", 5, ""), "0005");
+    assert_eq!(layout::render_filename("{name}", "2026", "2026-06-20", ".", 5, "arw"), "0005.arw");
+}
+
+#[test]
+fn render_strips_parent_traversal_segments() {
+    // A user-typed name with `..`/`.` cannot introduce traversal components.
+    let out = layout::render("{year}/{date} {name}", "2026", "2026-06-20", "../../../Volumes/x");
+    assert!(!out.split('/').any(|s| s == ".." || s == "."), "no standalone traversal segments: {out}");
+    assert_eq!(layout::render("{date}/{name}", "2026", "2026-06-20", "../.."), "2026-06-20");
+}
+
+#[test]
+fn name_token_cannot_escape_dest_root() {
+    // The naming form is free text; a `..`-laden name must still land under the dest root.
+    let card = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let root = card.path();
+    write_file(&root.join("DCIM/100MSDCF/a.arw"), b"x", DAY_A);
+
+    let mut r = rule(&["DCIM/100MSDCF"], dest.path().to_str().unwrap(), &["arw"]);
+    r.layout = "{date} {name}".into();
+    let mut names = BTreeMap::new();
+    names.insert(day_of(DAY_A), "../../../../escape".to_string());
+    let plan = plan_ingest(&r, root, &names, dest.path());
+
+    let dd = &plan[0].dest_dir;
+    assert!(
+        !dd.components().any(|c| matches!(c, std::path::Component::ParentDir)),
+        "dest_dir has no `..` components: {dd:?}"
+    );
+    assert!(dd.starts_with(dest.path()), "dest_dir stays under the configured root: {dd:?}");
+}
+
+#[test]
+fn plan_routes_split_by_extension() {
+    let card = tempfile::tempdir().unwrap();
+    let archive = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let root = card.path();
+    write_file(&root.join("DCIM/100MSDCF/a.arw"), b"raw", DAY_A);
+    write_file(&root.join("DCIM/100MSDCF/b.jpg"), b"jpg", DAY_A);
+
+    let mut r = rule(&["DCIM/100MSDCF"], dest.path().to_str().unwrap(), &["arw", "jpg"]);
+    r.layout = "{date}".into();
+    r.routes = vec![
+        Route { extensions: vec!["arw".into()], dest: archive.path().to_string_lossy().into(), layout: "RAW".into() },
+        Route { extensions: vec!["jpg".into()], dest: String::new(), layout: "jpg".into() },
+    ];
+    let plan = plan_ingest(&r, root, &BTreeMap::new(), dest.path());
+
+    let arw = plan.iter().find(|p| p.src.extension().unwrap() == "arw").unwrap();
+    let jpg = plan.iter().find(|p| p.src.extension().unwrap() == "jpg").unwrap();
+    assert_eq!(arw.dest_path, archive.path().join("RAW/a.arw"), "RAW routed to its own root + layout");
+    assert_eq!(jpg.dest_path, dest.path().join("jpg/b.jpg"), "JPG kept default root, own subfolder");
+}
+
+#[test]
+fn plan_routes_fall_back_to_rule_default_when_unmatched() {
+    let card = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let root = card.path();
+    write_file(&root.join("DCIM/100MSDCF/c.png"), b"png", DAY_A);
+
+    let mut r = rule(&["DCIM/100MSDCF"], dest.path().to_str().unwrap(), &[]); // all extensions
+    r.layout = "{date}".into();
+    r.routes = vec![Route { extensions: vec!["arw".into()], dest: String::new(), layout: "RAW".into() }];
+    let plan = plan_ingest(&r, root, &BTreeMap::new(), dest.path());
+
+    assert_eq!(plan.len(), 1);
+    assert_eq!(plan[0].dest_path, dest.path().join(day_of(DAY_A)).join("c.png"), "no route matched → rule default");
+}
+
+#[test]
+fn rename_sequences_per_folder_and_copies() {
+    let card = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let root = card.path();
+    write_file(&root.join("DCIM/100MSDCF/z.arw"), b"one", DAY_A);
+    write_file(&root.join("DCIM/100MSDCF/a.arw"), b"two!!", DAY_A); // same date → same folder
+
+    let mut r = rule(&["DCIM/100MSDCF"], dest.path().to_str().unwrap(), &["arw"]);
+    r.layout = "{date}".into();
+    r.rename = "{date}_{seq}".into();
+    let plan = plan_ingest(&r, root, &BTreeMap::new(), dest.path());
+
+    let day = day_of(DAY_A);
+    // Files are scanned sorted, so a.arw → _0001, z.arw → _0002.
+    let names: Vec<_> = plan.iter().map(|p| p.dest_path.file_name().unwrap().to_str().unwrap().to_string()).collect();
+    assert_eq!(names, vec![format!("{day}_0001.arw"), format!("{day}_0002.arw")]);
+
+    let report = run_ingest(&plan, |_, _| {});
+    assert_eq!(report.copied.len(), 2, "both renamed files copied");
+    assert!(dest.path().join(&day).join(format!("{day}_0001.arw")).exists());
+    assert!(dest.path().join(&day).join(format!("{day}_0002.arw")).exists());
+}
+
+#[test]
+fn rename_with_seq_never_loses_a_file_when_set_changes() {
+    // Regression: with `{seq}` the dest name comes from scan position, not the source. A
+    // different, equal-sized file added before the first must be COPIED (its bytes land at
+    // the destination), never skipped against the first file's bytes (which cleanup would
+    // then delete from the card).
+    let card = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let root = card.path();
+    write_file(&root.join("DCIM/100MSDCF/m_a.arw"), b"AAAAA", DAY_A); // 5 bytes
+
+    let mut r = rule(&["DCIM/100MSDCF"], dest.path().to_str().unwrap(), &["arw"]);
+    r.layout = "{date}".into();
+    r.rename = "{seq}".into();
+    let day = day_of(DAY_A);
+
+    run_ingest(&plan_ingest(&r, root, &BTreeMap::new(), dest.path()), |_, _| {});
+    assert_eq!(std::fs::read(dest.path().join(&day).join("0001.arw")).unwrap(), b"AAAAA");
+
+    write_file(&root.join("DCIM/100MSDCF/a_x.arw"), b"BBBBB", DAY_A); // same size, sorts earlier
+    let report = run_ingest(&plan_ingest(&r, root, &BTreeMap::new(), dest.path()), |_, _| {});
+
+    assert!(
+        report.copied.iter().any(|p| p.ends_with("DCIM/100MSDCF/a_x.arw")),
+        "the newcomer is copied, not silently skipped against the other file's bytes"
+    );
+    let contents: Vec<Vec<u8>> = std::fs::read_dir(dest.path().join(&day))
+        .unwrap().flatten().map(|e| std::fs::read(e.path()).unwrap()).collect();
+    assert!(contents.iter().any(|c| c == b"BBBBB"), "newcomer's bytes are physically at the destination");
+    assert!(contents.iter().any(|c| c == b"AAAAA"), "the first file is still present too");
+}
+
+#[test]
+fn rename_reimport_is_idempotent() {
+    // Re-importing the same card with a rename template skips everything (content match),
+    // never minting fresh {seq} numbers that duplicate the files.
+    let card = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let root = card.path();
+    write_file(&root.join("DCIM/100MSDCF/f_a.arw"), b"hello", DAY_A);
+    write_file(&root.join("DCIM/100MSDCF/f_b.arw"), b"world!!", DAY_A);
+
+    let mut r = rule(&["DCIM/100MSDCF"], dest.path().to_str().unwrap(), &["arw"]);
+    r.layout = "{date}".into();
+    r.rename = "{seq}".into();
+    let day = day_of(DAY_A);
+
+    let report1 = run_ingest(&plan_ingest(&r, root, &BTreeMap::new(), dest.path()), |_, _| {});
+    assert_eq!(report1.copied.len(), 2);
+
+    let report2 = run_ingest(&plan_ingest(&r, root, &BTreeMap::new(), dest.path()), |_, _| {});
+    assert_eq!(report2.copied.len(), 0, "re-import copies nothing");
+    assert_eq!(report2.skipped.len(), 2, "both recognised as already present");
+    assert_eq!(std::fs::read_dir(dest.path().join(&day)).unwrap().count(), 2, "no duplicate copies");
+}
+
+#[test]
+fn colliding_source_names_both_survive() {
+    // Two rollover dirs hold a same-named, different file. Both must land (one de-collided),
+    // and a re-run must recognise both as already present.
+    let card = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let root = card.path();
+    write_file(&root.join("DCIM/100MSDCF/x.arw"), b"first", DAY_A);
+    write_file(&root.join("DCIM/101MSDCF/x.arw"), b"second!!", DAY_A); // different content + size
+
+    let mut r = rule(&["DCIM/1*MSDCF"], dest.path().to_str().unwrap(), &["arw"]);
+    r.layout = "{date}".into();
+    let day = day_of(DAY_A);
+
+    let report = run_ingest(&plan_ingest(&r, root, &BTreeMap::new(), dest.path()), |_, _| {});
+    assert_eq!(report.copied.len(), 2, "both rollover files copied");
+    let contents: Vec<Vec<u8>> = std::fs::read_dir(dest.path().join(&day))
+        .unwrap().flatten().map(|e| std::fs::read(e.path()).unwrap()).collect();
+    assert!(contents.iter().any(|c| c == b"first") && contents.iter().any(|c| c == b"second!!"), "both present");
+
+    let report2 = run_ingest(&plan_ingest(&r, root, &BTreeMap::new(), dest.path()), |_, _| {});
+    assert_eq!(report2.skipped.len(), 2, "re-run recognises both via the same de-collision chain");
+}
+
+#[test]
+fn identical_content_distinct_sources_both_kept() {
+    // Two distinct card files (rollover dirs) with byte-IDENTICAL content must each get their
+    // own copy, not collapse to one — else cleanup deletes a source whose only dest copy
+    // belongs to a different source. (Content match alone is not source identity.)
+    let card = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let root = card.path();
+    write_file(&root.join("DCIM/100MSDCF/x.arw"), b"IDENTICAL", DAY_A);
+    write_file(&root.join("DCIM/101MSDCF/x.arw"), b"IDENTICAL", DAY_A);
+
+    let mut r = rule(&["DCIM/1*MSDCF"], dest.path().to_str().unwrap(), &["arw"]);
+    r.layout = "{date}".into();
+
+    let report = run_ingest(&plan_ingest(&r, root, &BTreeMap::new(), dest.path()), |_, _| {});
+    assert_eq!(report.copied.len(), 2, "both distinct sources copied, not deduped");
+    assert_eq!(std::fs::read_dir(dest.path().join(day_of(DAY_A))).unwrap().count(), 2, "two files for two sources");
+    assert!(report.is_clean(), "cleanup would delete both sources — both have their own copy");
+}
+
+#[test]
+fn identical_content_not_collapsed_against_preexisting_copy() {
+    // Dest already holds the file (a prior import). The card now has TWO identical-content
+    // sources with that name: one matches the pre-existing copy (skip), the other gets its
+    // own fresh copy rather than also skipping against that single pre-existing file.
+    let card = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let root = card.path();
+    let day = day_of(DAY_A);
+    write_file(&dest.path().join(&day).join("x.arw"), b"SAME", DAY_A); // pre-existing
+    write_file(&root.join("DCIM/100MSDCF/x.arw"), b"SAME", DAY_A);
+    write_file(&root.join("DCIM/101MSDCF/x.arw"), b"SAME", DAY_A);
+
+    let mut r = rule(&["DCIM/1*MSDCF"], dest.path().to_str().unwrap(), &["arw"]);
+    r.layout = "{date}".into();
+    let report = run_ingest(&plan_ingest(&r, root, &BTreeMap::new(), dest.path()), |_, _| {});
+    assert_eq!(report.copied.len() + report.skipped.len(), 2, "both sources accounted for");
+    assert_eq!(std::fs::read_dir(dest.path().join(&day)).unwrap().count(), 2, "pre-existing + one fresh = 2");
+}
+
+#[test]
 fn cleanup_deletes_only_when_fully_clean() {
     let card = tempfile::tempdir().unwrap();
     let dest = tempfile::tempdir().unwrap();
@@ -113,7 +351,8 @@ fn cleanup_deletes_only_when_fully_clean() {
     assert!(report.is_clean());
 
     let deleted = cleanup(&report).unwrap();
-    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted.deleted.len(), 1);
+    assert!(deleted.failed.is_empty());
     assert!(!root.join("DCIM/100MSDCF/a.arw").exists(), "source removed after verified copy");
 }
 
@@ -256,16 +495,35 @@ fn config_roundtrips_through_toml() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     let mut cfg = Config::default();
-    cfg.cards.push(rule(&["DCIM/100MSDCF"], "~/dest", &["arw", "jpg"]));
+    let mut card = rule(&["DCIM/100MSDCF"], "~/dest", &["arw", "jpg"]);
+    card.rename = "{date}_{seq}".into();
+    card.routes = vec![Route { extensions: vec!["arw".into()], dest: "~/raw".into(), layout: "RAW".into() }];
+    cfg.cards.push(card);
     cfg.save(&path).unwrap();
+
+    // Routes nest as `[[card.routes]]` — the field name must match the TS IPC key (no rename).
+    let written = std::fs::read_to_string(&path).unwrap();
+    assert!(written.contains("[[card.routes]]"), "routes serialize under the `routes` key:\n{written}");
+    assert!(!written.contains("[[card.route]]"), "no legacy `route` key");
+
     let back = Config::load(&path).unwrap();
     assert_eq!(back.cards.len(), 1);
     assert_eq!(back.cards[0].uuid, "TEST-UUID");
     assert_eq!(back.cards[0].extensions, vec!["arw", "jpg"]);
+    assert_eq!(back.cards[0].rename, "{date}_{seq}");
+    assert_eq!(back.cards[0].routes.len(), 1);
+    assert_eq!(back.cards[0].routes[0].dest, "~/raw");
 
     // Missing file → default, not an error.
     let absent = Config::load(&dir.path().join("nope.toml")).unwrap();
     assert!(absent.cards.is_empty());
+
+    // A config written before this feature (no `rename`/`routes`) still loads.
+    let legacy = dir.path().join("legacy.toml");
+    std::fs::write(&legacy, "[[card]]\nuuid = \"U\"\nsources = [\"DCIM/100MSDCF\"]\ndest = \"~/d\"\n").unwrap();
+    let old = Config::load(&legacy).unwrap();
+    assert_eq!(old.cards.len(), 1);
+    assert!(old.cards[0].rename.is_empty() && old.cards[0].routes.is_empty());
 }
 
 #[test]

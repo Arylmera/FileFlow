@@ -3,7 +3,7 @@
 //! Each flow runs on a single dedicated worker thread fed by an mpsc channel, which
 //! gives re-entrancy safety for free: one event can't start an overlapping run.
 
-use crate::state::{ActivityEntry, AppState};
+use crate::state::{ActivityEntry, AppState, RunRecord};
 use crate::volume;
 use fileflow_core::config::{AlbumMode, CardRule, CleanupPolicy, Destination, EjectPolicy, FolderRule};
 use fileflow_core::folder;
@@ -166,10 +166,36 @@ fn run_folder_move(app: &AppHandle, rule: &FolderRule) {
             );
             notify(app, "FileFlow — Folder move", &msg);
             emit_activity(app, "folder", &msg);
+            record_run(
+                app,
+                "folder",
+                format!("folder:{}", rule.watch),
+                &label,
+                rule.watch.clone(),
+                dest.clone(),
+                report.moved.len(),
+                0,
+                report.failed.len(),
+                run_status(report.moved.len(), report.failed.len()),
+                msg,
+            );
         }
         Err(e) => {
             notify(app, "FileFlow — destination unavailable", &e.to_string());
             emit_activity(app, "folder", &format!("{label}: {e}"));
+            record_run(
+                app,
+                "folder",
+                format!("folder:{}", rule.watch),
+                &label,
+                rule.watch.clone(),
+                dest.clone(),
+                0,
+                0,
+                0,
+                "failed",
+                e.to_string(),
+            );
         }
     }
 }
@@ -192,7 +218,7 @@ fn handle_volume(app: &AppHandle, volume_root: &Path) {
     };
 
     // Pre-flight the destination before reading anything off the card.
-    let dest = match ingest::resolve_dest(&rule) {
+    let dest = match ingest::resolve_dest(&rule, volume_root) {
         Ok(d) => d,
         Err(e) => {
             notify(app, "FileFlow — destination unavailable", &e.to_string());
@@ -258,6 +284,19 @@ pub fn run_card_ingest(
     let summary = format!("{c} copied, {s} skipped, {f} failed → {}", rule.dest);
     notify(app, &format!("FileFlow — {}", rule.label), &summary);
     emit_activity(app, "drive", &summary);
+    record_run(
+        app,
+        "drive",
+        format!("card:{}", rule.uuid),
+        &rule.label,
+        rule.sources.join(", "),
+        rule.dest.clone(),
+        c,
+        s,
+        f,
+        run_status(c + s, f),
+        summary.clone(),
+    );
 
     if !report.is_clean() {
         // All-or-nothing: any failure aborts both cleanup and eject. Card untouched.
@@ -266,7 +305,12 @@ pub fn run_card_ingest(
 
     match rule.cleanup {
         CleanupPolicy::Always => match ingest::cleanup(&report) {
-            Ok(d) => emit_activity(app, "drive", &format!("deleted {} file(s) from drive", d.len())),
+            Ok(c) => {
+                emit_activity(app, "drive", &format!("deleted {} file(s) from drive", c.deleted.len()));
+                if !c.failed.is_empty() {
+                    emit_activity(app, "drive", &format!("{} file(s) could not be removed from drive", c.failed.len()));
+                }
+            }
             Err(e) => emit_activity(app, "drive", &format!("cleanup error: {e}")),
         },
         CleanupPolicy::Never => {}
@@ -354,6 +398,19 @@ fn do_photos_import(
             let msg = format!("imported {} file(s) → {}", rep.imported, rep.album);
             notify(app, "FileFlow — Photos", &msg);
             emit_activity(app, "photos", &msg);
+            record_run(
+                app,
+                "photos",
+                format!("folder:{}", rule.watch),
+                &rule.label,
+                rule.watch.clone(),
+                "Apple Photos".to_string(),
+                rep.imported,
+                0,
+                0,
+                run_status(rep.imported, 0),
+                msg,
+            );
             let archive = ingest::expand(archive_folder);
             if let Err(e) = photos::after_import(files, *after_import, &archive) {
                 emit_activity(app, "photos", &format!("after-import error: {e}"));
@@ -366,10 +423,36 @@ fn do_photos_import(
                 "Grant access in System Settings ▸ Privacy & Security ▸ Automation.",
             );
             emit_activity(app, "photos", "not authorized (Automation)");
+            record_run(
+                app,
+                "photos",
+                format!("folder:{}", rule.watch),
+                &rule.label,
+                rule.watch.clone(),
+                "Apple Photos".to_string(),
+                0,
+                0,
+                files.len(),
+                "failed",
+                "Photos not authorized (Automation)".to_string(),
+            );
         }
         Err(e) => {
             notify(app, "FileFlow — Photos import failed", &e.to_string());
             emit_activity(app, "photos", &format!("error: {e}"));
+            record_run(
+                app,
+                "photos",
+                format!("folder:{}", rule.watch),
+                &rule.label,
+                rule.watch.clone(),
+                "Apple Photos".to_string(),
+                0,
+                0,
+                files.len(),
+                "failed",
+                e.to_string(),
+            );
         }
     }
 }
@@ -389,6 +472,49 @@ fn fda_blocked(volume_root: &Path) -> bool {
 
 fn notify(app: &AppHandle, title: &str, body: &str) {
     let _ = app.notification().builder().title(title).body(body).show();
+}
+
+/// `ok` when nothing failed, `failed` when nothing got through, else `partial`.
+fn run_status(progressed: usize, failed: usize) -> &'static str {
+    if failed > 0 && progressed == 0 {
+        "failed"
+    } else if failed > 0 {
+        "partial"
+    } else {
+        "ok"
+    }
+}
+
+/// Persist a completed run and emit a `run` event so an open Flow map refreshes live.
+#[allow(clippy::too_many_arguments)]
+fn record_run(
+    app: &AppHandle,
+    flow: &str,
+    rule_key: String,
+    label: &str,
+    source: String,
+    dest: String,
+    ok: usize,
+    skipped: usize,
+    failed: usize,
+    status: &str,
+    detail: String,
+) {
+    let rec = RunRecord {
+        ts: chrono::Local::now().to_rfc3339(),
+        flow: flow.to_string(),
+        rule_key,
+        label: label.to_string(),
+        source,
+        dest,
+        ok,
+        skipped,
+        failed,
+        status: status.to_string(),
+        detail,
+    };
+    app.state::<AppState>().push_run(rec.clone());
+    let _ = app.emit("run", rec);
 }
 
 fn emit_activity(app: &AppHandle, flow: &str, message: &str) {

@@ -92,6 +92,32 @@ pub struct CardRule {
     /// Empty = all extensions.
     #[serde(default)]
     pub extensions: Vec<String>,
+    /// Filename template applied on copy (tokens `{year} {date} {name} {seq}`); the
+    /// original extension is always kept. Empty = keep each file's original name.
+    #[serde(default)]
+    pub rename: String,
+    /// Per-extension destination overrides (RAW→A, JPG→B). Tried in order, first match
+    /// wins; files matching no route fall back to the rule's own `dest`/`layout`.
+    /// Empty = a single destination. Must stay the LAST field: it serializes as an
+    /// array-of-tables (`[[card.routes]]`) and the `toml` serializer needs every scalar
+    /// key emitted before it. (No serde rename — the field name is the wire key the TS
+    /// IPC layer reads, so TOML and JSON must agree on `routes`.)
+    #[serde(default)]
+    pub routes: Vec<Route>,
+}
+
+/// One extension→destination route inside a [`CardRule`] (feature: split-by-extension).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Route {
+    /// Extensions this route claims (case-insensitive). Empty = catch-all (the rest).
+    #[serde(default)]
+    pub extensions: Vec<String>,
+    /// Destination root override; empty = the rule's `dest`.
+    #[serde(default)]
+    pub dest: String,
+    /// Layout override; empty = the rule's `layout`.
+    #[serde(default)]
+    pub layout: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

@@ -1,6 +1,6 @@
 //! Thin, typed IPC surface over the core engine + watchers.
 
-use crate::state::{ActivityEntry, AppState};
+use crate::state::{ActivityEntry, AppState, RunRecord};
 use crate::{volume, watchers};
 use fileflow_core::config::Config;
 use fileflow_core::ingest::{self, DateGroup};
@@ -70,7 +70,7 @@ pub fn prepare_ingest(state: State<AppState>, uuid: String) -> Result<Vec<DateGr
         .cloned()
         .ok_or("no drive rule matches that UUID")?;
     let volume_root = volume::find_volume_by_uuid(&uuid).ok_or("drive not connected")?;
-    ingest::resolve_dest(&rule).map_err(|e| e.to_string())?;
+    ingest::resolve_dest(&rule, &volume_root).map_err(|e| e.to_string())?;
     Ok(ingest::scan_dates(&rule, &volume_root))
 }
 
@@ -90,7 +90,7 @@ pub fn run_ingest_now(
         .cloned()
         .ok_or("no drive rule matches that UUID")?;
     let volume_root = volume::find_volume_by_uuid(&uuid).ok_or("drive not connected")?;
-    let dest = ingest::resolve_dest(&rule).map_err(|e| e.to_string())?;
+    let dest = ingest::resolve_dest(&rule, &volume_root).map_err(|e| e.to_string())?;
     std::thread::spawn(move || {
         watchers::run_card_ingest(&app, &rule, &volume_root, &names, &dest);
     });
@@ -113,6 +113,12 @@ pub fn run_photos_import_now(app: AppHandle, index: usize, names: BTreeMap<Strin
 #[tauri::command]
 pub fn get_activity(state: State<AppState>, limit: usize) -> Vec<ActivityEntry> {
     state.recent_activity(limit)
+}
+
+/// Recent run records (most-recent-first), the durable history behind the Flow map.
+#[tauri::command]
+pub fn get_runs(state: State<AppState>, limit: usize) -> Vec<RunRecord> {
+    state.recent_runs(limit)
 }
 
 /// True if `path` (after `~` expansion) is an existing, writable directory.
