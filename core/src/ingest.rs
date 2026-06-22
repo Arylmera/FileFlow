@@ -164,11 +164,16 @@ pub fn plan_ingest(
 
 /// Execute the plan: create dirs, copy preserving mtime, verify by byte size.
 /// A vanished/unreachable destination surfaces here as failed copies → cleanup is skipped.
-pub fn run_ingest(plan: &[PlannedCopy]) -> IngestReport {
+///
+/// `on_progress(done, total)` is called before each file (done = files finished so far)
+/// and once more at the end with `(total, total)`. Pass `|_, _| {}` to ignore it.
+pub fn run_ingest(plan: &[PlannedCopy], mut on_progress: impl FnMut(usize, usize)) -> IngestReport {
     let mut report = IngestReport::default();
     let mut folders = std::collections::BTreeSet::new();
+    let total = plan.len();
 
-    for pc in plan {
+    for (i, pc) in plan.iter().enumerate() {
+        on_progress(i, total);
         let src_len = match std::fs::metadata(&pc.src) {
             Ok(m) => m.len(),
             Err(e) => {
@@ -216,6 +221,7 @@ pub fn run_ingest(plan: &[PlannedCopy]) -> IngestReport {
         folders.insert(pc.folder.clone());
     }
 
+    on_progress(total, total);
     report.folders = folders.into_iter().collect();
     report
 }

@@ -105,6 +105,27 @@ body {
   letter-spacing: -0.02em;
 }
 
+.progress-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.progress-strip span {
+  white-space: nowrap;
+}
+
+.progress-strip progress {
+  flex: 1;
+  height: 6px;
+  accent-color: var(--accent);
+}
+
 .topbar nav {
   display: flex;
   gap: 2px;

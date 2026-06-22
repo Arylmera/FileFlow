@@ -83,7 +83,7 @@ fn run_ingest_copies_verifies_and_is_idempotent() {
     let plan = plan_ingest(&r, root, &names, dest.path());
     assert_eq!(plan.len(), 2);
 
-    let report = run_ingest(&plan);
+    let report = run_ingest(&plan, |_, _| {});
     assert_eq!(report.copied.len(), 2);
     assert!(report.failed.is_empty());
     assert_eq!(report.folders.len(), 2, "two date folders created");
@@ -95,7 +95,7 @@ fn run_ingest_copies_verifies_and_is_idempotent() {
     }
 
     // Re-run: everything already present → all skipped, nothing re-copied.
-    let report2 = run_ingest(&plan);
+    let report2 = run_ingest(&plan, |_, _| {});
     assert_eq!(report2.copied.len(), 0);
     assert_eq!(report2.skipped.len(), 2);
 }
@@ -109,7 +109,7 @@ fn cleanup_deletes_only_when_fully_clean() {
 
     let r = rule(&["DCIM/100MSDCF"], dest.path().to_str().unwrap(), &["arw"]);
     let plan = plan_ingest(&r, root, &BTreeMap::new(), dest.path());
-    let report = run_ingest(&plan);
+    let report = run_ingest(&plan, |_, _| {});
     assert!(report.is_clean());
 
     let deleted = cleanup(&report).unwrap();
@@ -227,7 +227,8 @@ fn folder_move_relocates_into_dated_dest() {
     write_file(&a, b"x", DAY_A);
 
     let report =
-        run_folder_move(&folder_rule(watch.to_str().unwrap(), dest.to_str().unwrap())).unwrap();
+        run_folder_move(&folder_rule(watch.to_str().unwrap(), dest.to_str().unwrap()), |_, _| {})
+            .unwrap();
     assert_eq!(report.moved.len(), 1);
     assert!(report.failed.is_empty());
     assert!(!a.exists(), "source file moved out");
@@ -245,7 +246,7 @@ fn folder_move_errors_when_dest_unavailable() {
     write_file(&watch.join("a.jpg"), b"x", DAY_A);
 
     let missing = dir.path().join("does-not-exist");
-    let r = run_folder_move(&folder_rule(watch.to_str().unwrap(), missing.to_str().unwrap()));
+    let r = run_folder_move(&folder_rule(watch.to_str().unwrap(), missing.to_str().unwrap()), |_, _| {});
     assert!(r.is_err(), "missing dest root → error");
     assert!(watch.join("a.jpg").exists(), "source untouched when dest unavailable");
 }

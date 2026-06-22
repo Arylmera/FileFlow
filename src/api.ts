@@ -89,6 +89,13 @@ export interface PhotosReady {
   dates: DateGroup[];
 }
 
+export interface Progress {
+  flow: string;
+  label: string;
+  done: number;
+  total: number;
+}
+
 // Running outside the Tauri webview (e.g. a plain browser) has no IPC bridge;
 // loaders fall back to defaults so the shell still renders.
 const inTauri =

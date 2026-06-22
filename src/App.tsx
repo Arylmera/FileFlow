@@ -18,6 +18,7 @@ import type {
   MountedCard,
   NameMode,
   PhotosReady,
+  Progress,
 } from "./api";
 import "./App.css";
 
@@ -160,12 +161,17 @@ export default function App() {
   const [dirty, setDirty] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [naming, setNaming] = useState<NamingReq | null>(null);
+  const [progress, setProgress] = useState<Progress | null>(null);
 
   useEffect(() => {
     api.getConfig().then(setConfig);
     api.getActivity(100).then(setActivity);
 
     const unlisten = [
+      // Keep the bar while files remain; the final (total, total) event clears it.
+      listen<Progress>("progress", (e) =>
+        setProgress(e.payload.done >= e.payload.total ? null : e.payload),
+      ),
       listen<ActivityEntry>("activity", (e) => setActivity((a) => [e.payload, ...a].slice(0, 200))),
       listen<CardReady>("card-ready", (e) =>
         setNaming({ kind: "card", uuid: e.payload.uuid, label: e.payload.label, dates: e.payload.dates }),
@@ -204,6 +210,15 @@ export default function App() {
           {dirty ? "Save changes" : "✓ Saved"}
         </button>
       </header>
+
+      {progress && (
+        <div className="progress-strip">
+          <span>
+            {progress.label}: {progress.done}/{progress.total}
+          </span>
+          <progress value={progress.done} max={progress.total} />
+        </div>
+      )}
 
       <main>
         {tab === "status" && (

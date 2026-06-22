@@ -27,7 +27,12 @@ pub struct MoveReport {
 /// it, never the root itself (so an unmounted network/external dest can't get a local
 /// stub; same rule as card ingest). The scan is non-recursive, so a dest nested inside
 /// the watch folder won't re-trigger.
-pub fn run_folder_move(rule: &FolderRule) -> Result<MoveReport> {
+///
+/// `on_progress(done, total)` reports per-file progress (see [`crate::ingest::run_ingest`]).
+pub fn run_folder_move(
+    rule: &FolderRule,
+    mut on_progress: impl FnMut(usize, usize),
+) -> Result<MoveReport> {
     let Destination::Folder { dest, layout } = &rule.target else {
         return Ok(MoveReport::default()); // not a folder-move rule — nothing to do
     };
@@ -37,9 +42,12 @@ pub fn run_folder_move(rule: &FolderRule) -> Result<MoveReport> {
     }
     let src = expand(&rule.watch);
     let mut report = MoveReport::default();
-    for f in scan_folder(&src, &rule.extensions) {
+    let files = scan_folder(&src, &rule.extensions);
+    let total = files.len();
+    for (i, f) in files.iter().enumerate() {
+        on_progress(i, total);
         let Some(name) = f.file_name() else { continue };
-        let dir = match std::fs::metadata(&f).and_then(|m| m.modified()) {
+        let dir = match std::fs::metadata(f).and_then(|m| m.modified()) {
             Ok(mtime) => {
                 let (year, date) = layout::date_parts(mtime);
                 dest_root.join(layout::render(layout, &year, &date, ""))
@@ -47,9 +55,9 @@ pub fn run_folder_move(rule: &FolderRule) -> Result<MoveReport> {
             Err(_) => dest_root.clone(),
         };
         let target = dir.join(name);
-        match move_file(&f, &target) {
+        match move_file(f, &target) {
             Ok(()) => report.moved.push(target),
-            Err(e) => report.failed.push(FailedMove { src: f, error: e.to_string() }),
+            Err(e) => report.failed.push(FailedMove { src: f.clone(), error: e.to_string() }),
         }
     }
     Ok(report)

@@ -39,6 +39,21 @@ struct PhotosReady {
     dates: Vec<DateGroup>,
 }
 
+/// Per-file progress for the copy (drive) and move (folder) flows.
+#[derive(Clone, Serialize)]
+struct Progress {
+    flow: &'static str,
+    label: String,
+    done: usize,
+    total: usize,
+}
+
+/// Emit a `progress` event. (ponytail: one event per file; add throttling only if a
+/// huge card visibly floods the UI.)
+fn emit_progress(app: &AppHandle, flow: &'static str, label: &str, done: usize, total: usize) {
+    let _ = app.emit("progress", Progress { flow, label: label.to_string(), done, total });
+}
+
 /// Set up the watchers and their worker threads. Call once, after [`AppState`] is managed.
 ///
 /// Note: folder watchers bind to their configured paths at startup; adding, removing,
@@ -137,7 +152,7 @@ fn run_folder_move(app: &AppHandle, rule: &FolderRule) {
     } else {
         rule.label.clone()
     };
-    match folder::run_folder_move(rule) {
+    match folder::run_folder_move(rule, |done, total| emit_progress(app, "folder", &label, done, total)) {
         Ok(report) => {
             if report.moved.is_empty() && report.failed.is_empty() {
                 return;
@@ -236,7 +251,9 @@ pub fn run_card_ingest(
     dest: &Path,
 ) {
     let plan = ingest::plan_ingest(rule, volume_root, names, dest);
-    let report = ingest::run_ingest(&plan);
+    let report = ingest::run_ingest(&plan, |done, total| {
+        emit_progress(app, "drive", &rule.label, done, total)
+    });
     let (c, s, f) = (report.copied.len(), report.skipped.len(), report.failed.len());
     let summary = format!("{c} copied, {s} skipped, {f} failed → {}", rule.dest);
     notify(app, &format!("FileFlow — {}", rule.label), &summary);
