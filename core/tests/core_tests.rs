@@ -537,3 +537,26 @@ fn scan_folder_skips_files_still_being_written() {
     assert_eq!(files.len(), 1, "only the settled file is returned");
     assert_eq!(files[0].file_name().unwrap(), "settled.jpg");
 }
+
+#[test]
+fn scan_folder_skips_a_file_that_grows_during_the_recheck() {
+    // A large/slow write that's quiet for >2s but still growing must be skipped, so a
+    // half-written file is never handed to Photos (the >100MB metadata-warning case).
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    let export = root.join("export.jpg");
+    write_file(&export, b"partial", DAY_A); // old mtime → passes the quiet gate
+
+    // A writer appends more bytes shortly after the scan samples the size.
+    let target = export.clone();
+    let writer = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().append(true).open(&target).unwrap();
+        f.write_all(b"...the rest of a big file...").unwrap();
+    });
+
+    let files = scan_folder(&root, &["jpg".into()]);
+    writer.join().unwrap();
+    assert!(files.is_empty(), "a file still growing across the re-check is skipped");
+}

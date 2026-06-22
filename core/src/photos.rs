@@ -7,32 +7,56 @@ use crate::{layout, Error, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
-/// True once a file hasn't been touched for ~2s — a cheap "done being written" gate.
-/// A file skipped here is picked up on the next watcher fire, so nothing is lost.
-// ponytail: mtime age only; upgrade to a two-stat size comparison if a transfer
-// can stall longer than this window mid-file.
-fn settled(p: &Path) -> bool {
-    std::fs::metadata(p)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|mt| mt.elapsed().ok())
-        .map_or(true, |age| age >= std::time::Duration::from_secs(2))
+/// Ignore files touched within this window — they're likely still being written.
+const QUIET_FOR: Duration = Duration::from_secs(2);
+/// Re-stat each candidate after this pause; a size change means it's still growing.
+const SETTLE_RECHECK: Duration = Duration::from_millis(1200);
+
+/// `Some(size)` if `p` looks idle *right now* — not touched within [`QUIET_FOR`] (a mtime
+/// we can't read, or one in the future, also can't mean "written just now"). `None` if it
+/// was touched recently or can't be stat'd, so we skip it this pass and retry on the next
+/// watcher fire — never importing a file we can't measure.
+fn quiet_len(p: &Path) -> Option<u64> {
+    let m = std::fs::metadata(p).ok()?;
+    match m.modified().ok().and_then(|t| t.elapsed().ok()) {
+        Some(age) if age < QUIET_FOR => None,
+        _ => Some(m.len()),
+    }
 }
 
 /// List top-level files in an export folder that match `extensions` (non-recursive).
-/// Subdirectories (e.g. an `_imported` archive) are skipped by design. Files still
-/// being written (mtime <2s old) are skipped so a half-copied file isn't imported.
+/// Subdirectories (e.g. an `_imported` archive) are skipped by design.
+///
+/// A file is returned only once it looks finished: quiet for ~2s AND its size is unchanged
+/// across a short re-stat. The size re-check is what makes this safe for large files
+/// (>100MB) whose write can pause for >2s mid-transfer — a still-growing file is skipped
+/// and picked up whole on the next watcher fire, so a half-written file is never imported.
+// ponytail: mtime-quiet + size-stable; a write that stalls for the entire re-check window
+// mid-file could still slip through. Add a writer marker (e.g. a `.part` rename) only if so.
 pub fn scan_folder(folder: &Path, extensions: &[String]) -> Vec<PathBuf> {
-    let mut out = Vec::new();
+    let mut candidates: Vec<(PathBuf, u64)> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(folder) {
         for e in rd.flatten() {
             let p = e.path();
-            if p.is_file() && !is_hidden(&p) && ext_matches(&p, extensions) && settled(&p) {
-                out.push(p);
+            if p.is_file() && !is_hidden(&p) && ext_matches(&p, extensions) {
+                if let Some(len) = quiet_len(&p) {
+                    candidates.push((p, len));
+                }
             }
         }
     }
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+    // Let any in-flight write advance, then keep only files whose size held steady.
+    std::thread::sleep(SETTLE_RECHECK);
+    let mut out: Vec<PathBuf> = candidates
+        .into_iter()
+        .filter(|(p, len)| std::fs::metadata(p).map(|m| m.len()).ok() == Some(*len))
+        .map(|(p, _)| p)
+        .collect();
     out.sort();
     out
 }
