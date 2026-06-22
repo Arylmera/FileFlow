@@ -3,7 +3,7 @@ use fileflow_core::folder::run_folder_move;
 use fileflow_core::ingest::{
     cleanup, plan_ingest, run_ingest, scan_dates, scan_files, FailedCopy, IngestReport,
 };
-use fileflow_core::photos::{after_import, album_groups, build_import_script};
+use fileflow_core::photos::{after_import, album_groups, build_import_script, scan_folder};
 use fileflow_core::{config::Config, layout};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -266,4 +266,16 @@ fn config_roundtrips_through_toml() {
     // Missing file → default, not an error.
     let absent = Config::load(&dir.path().join("nope.toml")).unwrap();
     assert!(absent.cards.is_empty());
+}
+
+#[test]
+fn scan_folder_skips_files_still_being_written() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("settled.jpg"), b"x", DAY_A); // old mtime → settled
+    std::fs::write(root.join("writing.jpg"), b"x").unwrap(); // fresh mtime → skipped
+
+    let files = scan_folder(root, &["jpg".into()]);
+    assert_eq!(files.len(), 1, "only the settled file is returned");
+    assert_eq!(files[0].file_name().unwrap(), "settled.jpg");
 }

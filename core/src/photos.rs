@@ -8,14 +8,27 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// True once a file hasn't been touched for ~2s — a cheap "done being written" gate.
+/// A file skipped here is picked up on the next watcher fire, so nothing is lost.
+// ponytail: mtime age only; upgrade to a two-stat size comparison if a transfer
+// can stall longer than this window mid-file.
+fn settled(p: &Path) -> bool {
+    std::fs::metadata(p)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|mt| mt.elapsed().ok())
+        .map_or(true, |age| age >= std::time::Duration::from_secs(2))
+}
+
 /// List top-level files in an export folder that match `extensions` (non-recursive).
-/// Subdirectories (e.g. an `_imported` archive) are skipped by design.
+/// Subdirectories (e.g. an `_imported` archive) are skipped by design. Files still
+/// being written (mtime <2s old) are skipped so a half-copied file isn't imported.
 pub fn scan_folder(folder: &Path, extensions: &[String]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir(folder) {
         for e in rd.flatten() {
             let p = e.path();
-            if p.is_file() && !is_hidden(&p) && ext_matches(&p, extensions) {
+            if p.is_file() && !is_hidden(&p) && ext_matches(&p, extensions) && settled(&p) {
                 out.push(p);
             }
         }
