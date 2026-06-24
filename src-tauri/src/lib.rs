@@ -157,6 +157,7 @@ pub fn run() {
             commands::list_mounted_cards,
             commands::prepare_ingest,
             commands::run_ingest_now,
+            commands::eject_now,
             commands::run_photos_import_now,
             commands::run_folder_now,
             commands::get_activity,

@@ -2,7 +2,7 @@
 
 use crate::state::{ActivityEntry, AppState, RunRecord};
 use crate::{volume, watchers};
-use fileflow_core::config::Config;
+use fileflow_core::config::{Config, EjectPolicy};
 use fileflow_core::ingest::{self, DateGroup};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -94,6 +94,13 @@ pub fn run_ingest_now(
     std::thread::spawn(move || {
         watchers::run_card_ingest(&app, &rule, &volume_root, &names, &dest);
     });
+    Ok(())
+}
+
+/// Manually eject a mounted volume by its mount path. Independent of any rule.
+#[tauri::command]
+pub fn eject_now(path: PathBuf) -> Result<(), String> {
+    ingest::eject(&path, EjectPolicy::Always).map_err(|e| e.to_string())?;
     Ok(())
 }
 

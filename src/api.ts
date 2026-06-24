@@ -200,6 +200,7 @@ export const listMountedCards = () => load<MountedCard[]>("list_mounted_cards", 
 export const prepareIngest = (uuid: string) => invoke<DateGroup[]>("prepare_ingest", { uuid });
 export const runIngestNow = (uuid: string, names: Record<string, string>) =>
   invoke<void>("run_ingest_now", { uuid, names });
+export const ejectNow = (path: string) => invoke<void>("eject_now", { path });
 export const runFolderNow = (index: number) => invoke<void>("run_folder_now", { index });
 export const runPhotosImportNow = (index: number, names: Record<string, string>) =>
   invoke<void>("run_photos_import_now", { index, names });

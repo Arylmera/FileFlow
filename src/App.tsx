@@ -621,6 +621,15 @@ function StatusView({
     }
   }
 
+  async function ejectNow(path: string) {
+    try {
+      await api.ejectNow(path);
+      refresh();
+    } catch (e) {
+      alert(String(e));
+    }
+  }
+
   return (
     <section>
       <header className="view-head">
@@ -663,7 +672,10 @@ function StatusView({
                 <span className="badge">{c.uuid ?? "no uuid"}</span>
               )}
             </span>
-            {c.matched && c.uuid && <button onClick={() => importNow(c.uuid!)}>Import now</button>}
+            <span className="row">
+              {c.matched && c.uuid && <button onClick={() => importNow(c.uuid!)}>Import now</button>}
+              <button onClick={() => ejectNow(c.path)}>Eject</button>
+            </span>
           </li>
         ))}
       </ul>
