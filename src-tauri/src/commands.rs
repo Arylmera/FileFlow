@@ -51,6 +51,7 @@ pub fn save_config(app: AppHandle, state: State<AppState>, mut config: Config) -
     config.save(&state.config_path).map_err(|e| e.to_string())?;
     crate::apply_window_mode(&app, &config.app);
     *state.config.lock().unwrap() = config;
+    watchers::rebind_folders(&app); // pick up added/removed/re-pointed folder rules without a restart
     Ok(())
 }
 

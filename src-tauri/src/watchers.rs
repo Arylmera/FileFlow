@@ -57,8 +57,9 @@ fn emit_progress(app: &AppHandle, flow: &'static str, label: &str, done: usize, 
 
 /// Set up the watchers and their worker threads. Call once, after [`AppState`] is managed.
 ///
-/// Note: folder watchers bind to their configured paths at startup; adding, removing,
-/// or re-pointing a folder rule needs an app restart to re-bind.
+/// Folder watchers bind to their configured paths here and are re-bound on every
+/// `save_config` via [`rebind_folders`], so adding/removing/re-pointing a folder rule
+/// takes effect live without an app restart.
 pub fn start(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
 
@@ -73,28 +74,53 @@ pub fn start(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         std::thread::spawn(move || volume_worker(h, vrx));
     }
 
-    // --- Folder watchers (one per configured rule, either kind) ---
-    let mut folder_watchers = Vec::new();
+    app.manage(Mutex::new(WatcherHandles {
+        _volumes: vol_watcher,
+        _folders: build_folder_watchers(&handle),
+    }));
+    Ok(())
+}
+
+/// Build one folder watcher + worker per configured rule whose watch path exists.
+/// Dropping a returned watcher closes its worker's channel, so the worker exits —
+/// which is how [`rebind_folders`] tears down the old set.
+fn build_folder_watchers(app: &AppHandle) -> Vec<notify::RecommendedWatcher> {
+    let mut watchers = Vec::new();
     for (i, rule) in app.state::<AppState>().snapshot().folders.iter().enumerate() {
         let folder = ingest::expand(&rule.watch);
         if !folder.is_dir() {
             continue;
         }
         let (ftx, frx) = mpsc::channel::<()>();
-        let mut w = notify::recommended_watcher(move |_res| {
+        let mut w = match notify::recommended_watcher(move |_res| {
             let _ = ftx.send(());
-        })?;
-        w.watch(&folder, RecursiveMode::NonRecursive)?;
-        let h = handle.clone();
+        }) {
+            Ok(w) => w,
+            Err(e) => {
+                tracing::warn!("folder watcher create failed for {}: {e}", rule.watch);
+                continue;
+            }
+        };
+        if let Err(e) = w.watch(&folder, RecursiveMode::NonRecursive) {
+            tracing::warn!("folder watch failed for {}: {e}", rule.watch);
+            continue;
+        }
+        let h = app.clone();
         std::thread::spawn(move || folder_worker(h, i, frx));
-        folder_watchers.push(w);
+        watchers.push(w);
     }
+    watchers
+}
 
-    app.manage(Mutex::new(WatcherHandles {
-        _volumes: vol_watcher,
-        _folders: folder_watchers,
-    }));
-    Ok(())
+/// Re-bind folder watchers from the current config (call after `save_config`). Replacing
+/// the stored handles drops the old watchers, which stops their workers; new workers pick
+/// up the updated rule list. ponytail: a poke arriving mid-swap could double-run a rule,
+/// but a re-move just finds nothing — harmless, so no cross-thread coordination.
+pub fn rebind_folders(app: &AppHandle) {
+    let fresh = build_folder_watchers(app);
+    if let Some(handles) = app.try_state::<Mutex<WatcherHandles>>() {
+        handles.lock().unwrap()._folders = fresh;
+    }
 }
 
 /// Diff `/Volumes` on each poke; newly-mounted volumes are handled once.
