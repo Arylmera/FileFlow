@@ -500,6 +500,13 @@ fn record_run(
     status: &str,
     detail: String,
 ) {
+    // A re-scan that imported/copied nothing and failed nothing isn't a run worth logging:
+    // recording it resets the lane's "last imported" time to now while the count stays
+    // cumulative, so a no-op re-import reads as "44 files imported · just now". Failures
+    // (failed > 0) still get logged.
+    if ok == 0 && failed == 0 {
+        return;
+    }
     let rec = RunRecord {
         ts: chrono::Local::now().to_rfc3339(),
         flow: flow.to_string(),
