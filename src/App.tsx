@@ -1426,8 +1426,10 @@ function ActivityView({ activity }: { activity: ActivityEntry[] }) {
 
 function SettingsView({ config, patch }: { config: Config; patch: (p: Partial<Config>) => void }) {
   const [autostart, setAutostart] = useState<boolean | null>(null);
+  const [version, setVersion] = useState("");
   useEffect(() => {
     isEnabled().then(setAutostart).catch(() => setAutostart(false));
+    import("@tauri-apps/api/app").then((m) => m.getVersion()).then(setVersion).catch(() => {});
   }, []);
 
   return (
@@ -1531,6 +1533,8 @@ function SettingsView({ config, patch }: { config: Config; patch: (p: Partial<Co
           Open log file
         </button>
       </div>
+
+      <p className="help">FileFlow {version && `v${version}`}</p>
     </section>
   );
 }
