@@ -23,8 +23,30 @@ pub fn get_config(state: State<AppState>) -> Config {
     state.snapshot()
 }
 
+/// Reject a save whose include/exclude regex won't compile, so a bad pattern can't
+/// silently turn every flow into a deny-all (the scanners' fail-closed fallback).
+fn validate_filters(config: &Config) -> Result<(), String> {
+    use fileflow_core::util::validate_regex;
+    let check = |pat: &str, which: &str, what: &str, label: &str| {
+        validate_regex(pat).map_err(|e| {
+            let name = if label.is_empty() { "(unnamed)" } else { label };
+            format!("{what} “{name}”: {which} pattern is invalid — {e}")
+        })
+    };
+    for c in &config.cards {
+        check(&c.include, "include", "Drive", &c.label)?;
+        check(&c.exclude, "exclude", "Drive", &c.label)?;
+    }
+    for f in &config.folders {
+        check(&f.include, "include", "Folder", &f.label)?;
+        check(&f.exclude, "exclude", "Folder", &f.label)?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn save_config(app: AppHandle, state: State<AppState>, mut config: Config) -> Result<(), String> {
+    validate_filters(&config)?;
     config.app.ensure_reachable();
     config.save(&state.config_path).map_err(|e| e.to_string())?;
     crate::apply_window_mode(&app, &config.app);

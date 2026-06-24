@@ -23,6 +23,14 @@ pub struct FolderRule {
     /// Empty = handle all file types.
     #[serde(default)]
     pub extensions: Vec<String>,
+    /// Regex whitelist on the file name: only files whose name matches are handled.
+    /// Empty = no whitelist. Applied with `exclude` after the `extensions` check.
+    #[serde(default)]
+    pub include: String,
+    /// Regex blacklist on the file name: files whose name matches are skipped, even if
+    /// they pass `include`. Empty = nothing excluded.
+    #[serde(default)]
+    pub exclude: String,
     /// Destination. Flattened so `kind` and its fields sit at the rule's top level
     /// (e.g. `kind = "photos"` beside `album_mode`), keeping each rule to only the
     /// fields its kind actually uses.
@@ -96,6 +104,14 @@ pub struct CardRule {
     /// original extension is always kept. Empty = keep each file's original name.
     #[serde(default)]
     pub rename: String,
+    /// Regex whitelist on the file name: only files whose name matches are copied.
+    /// Empty = no whitelist. Applied with `exclude` after the `extensions` check.
+    #[serde(default)]
+    pub include: String,
+    /// Regex blacklist on the file name: files whose name matches are skipped, even if
+    /// they pass `include`. Empty = nothing excluded.
+    #[serde(default)]
+    pub exclude: String,
     /// Per-extension destination overrides (RAW→A, JPG→B). Tried in order, first match
     /// wins; files matching no route fall back to the rule's own `dest`/`layout`.
     /// Empty = a single destination. Must stay the LAST field: it serializes as an

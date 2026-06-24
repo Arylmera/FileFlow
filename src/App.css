@@ -271,6 +271,11 @@ button.danger:hover:not(:disabled) {
   color: var(--muted);
 }
 
+/* Invalid-regex hint under a RegexField input. */
+.help.err {
+  color: var(--warn);
+}
+
 .check-help {
   margin: -2px 0 var(--s4) 28px;
 }

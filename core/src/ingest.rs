@@ -5,7 +5,7 @@
 //! all-or-nothing guarantee holds even if a caller forgets to.
 
 use crate::config::{CardRule, EjectPolicy};
-use crate::util::{ext_matches, is_hidden};
+use crate::util::{ext_matches, is_hidden, NameFilter};
 use crate::layout;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -126,6 +126,9 @@ pub fn is_writable_dir(dir: &Path) -> bool {
 
 /// Enumerate matching files under the rule's source folders (globs supported).
 pub fn scan_files(rule: &CardRule, volume_root: &Path) -> Vec<PathBuf> {
+    // Bad regex fails closed (deny-all): save_config rejects bad patterns, so a broken
+    // one here means a hand-edited config — copy nothing rather than misjudge files.
+    let filter = NameFilter::compile_or_deny(&rule.include, &rule.exclude);
     let mut out = Vec::new();
     for src in &rule.sources {
         let pattern = volume_root.join(src);
@@ -135,11 +138,19 @@ pub fn scan_files(rule: &CardRule, volume_root: &Path) -> Vec<PathBuf> {
             if entry.is_dir() {
                 for f in WalkDir::new(&entry).into_iter().filter_map(|e| e.ok()) {
                     let p = f.path();
-                    if f.file_type().is_file() && !is_hidden(p) && ext_matches(p, &rule.extensions) {
+                    if f.file_type().is_file()
+                        && !is_hidden(p)
+                        && ext_matches(p, &rule.extensions)
+                        && filter.accepts(p)
+                    {
                         out.push(p.to_path_buf());
                     }
                 }
-            } else if entry.is_file() && !is_hidden(&entry) && ext_matches(&entry, &rule.extensions) {
+            } else if entry.is_file()
+                && !is_hidden(&entry)
+                && ext_matches(&entry, &rule.extensions)
+                && filter.accepts(&entry)
+            {
                 out.push(entry);
             }
         }

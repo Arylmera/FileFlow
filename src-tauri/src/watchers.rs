@@ -9,6 +9,7 @@ use fileflow_core::config::{AlbumMode, CardRule, CleanupPolicy, Destination, Eje
 use fileflow_core::folder;
 use fileflow_core::ingest::{self, DateGroup};
 use fileflow_core::photos;
+use fileflow_core::util::NameFilter;
 use notify::{RecursiveMode, Watcher};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -340,7 +341,8 @@ fn run_photos_flow(app: &AppHandle, index: usize, rule: &FolderRule) {
     let Destination::Photos { album_mode, prompt_name, .. } = &rule.target else {
         return;
     };
-    let files = photos::scan_folder(&ingest::expand(&rule.watch), &rule.extensions);
+    let filter = NameFilter::compile_or_deny(&rule.include, &rule.exclude);
+    let files = photos::scan_folder(&ingest::expand(&rule.watch), &rule.extensions, &filter);
     if files.is_empty() {
         return;
     }
@@ -362,7 +364,8 @@ pub fn run_photos_import_named(app: &AppHandle, index: usize, names: &BTreeMap<S
     let Some(rule) = app.state::<AppState>().snapshot().folders.get(index).cloned() else {
         return;
     };
-    let files = photos::scan_folder(&ingest::expand(&rule.watch), &rule.extensions);
+    let filter = NameFilter::compile_or_deny(&rule.include, &rule.exclude);
+    let files = photos::scan_folder(&ingest::expand(&rule.watch), &rule.extensions, &filter);
     if !files.is_empty() {
         do_photos_import(app, &rule, &files, names);
     }

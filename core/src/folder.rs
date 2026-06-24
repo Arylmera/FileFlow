@@ -4,7 +4,7 @@
 use crate::config::{Destination, FolderRule};
 use crate::ingest::{expand, is_writable_dir};
 use crate::photos::scan_folder;
-use crate::util::move_file;
+use crate::util::{move_file, NameFilter};
 use crate::{layout, Error, Result};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -42,7 +42,9 @@ pub fn run_folder_move(
     }
     let src = expand(&rule.watch);
     let mut report = MoveReport::default();
-    let files = scan_folder(&src, &rule.extensions);
+    // Bad regex fails closed (deny-all); save_config rejects bad patterns up front.
+    let filter = NameFilter::compile_or_deny(&rule.include, &rule.exclude);
+    let files = scan_folder(&src, &rule.extensions, &filter);
     let total = files.len();
     for (i, f) in files.iter().enumerate() {
         on_progress(i, total);

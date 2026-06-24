@@ -1016,6 +1016,7 @@ dependencies = [
  "chrono",
  "filetime",
  "glob",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

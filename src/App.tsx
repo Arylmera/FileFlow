@@ -179,6 +179,44 @@ function CsvField({
   );
 }
 
+/**
+ * Single-pattern regex editor with an inline validity check. The authoritative
+ * validation is server-side (save_config uses Rust's regex engine, which differs
+ * slightly from JS); this just gives instant feedback on obvious typos.
+ */
+function RegexField({
+  label,
+  help,
+  placeholder,
+  value,
+  onChange,
+}: {
+  label: string;
+  help?: string;
+  placeholder?: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  let err: string | null = null;
+  if (value) {
+    try {
+      new RegExp(value);
+    } catch (e) {
+      err = (e as Error).message;
+    }
+  }
+  return (
+    <Field
+      label={label}
+      help={err ? undefined : help}
+      badge={err ? <span className="badge warn">invalid</span> : undefined}
+    >
+      <input placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
+      {err && <span className="help err">{err}</span>}
+    </Field>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>("flow");
   const [config, setConfig] = useState<Config>(api.emptyConfig);
@@ -210,8 +248,13 @@ export default function App() {
   }, []);
 
   async function save() {
-    await api.saveConfig(config);
-    setDirty(false);
+    try {
+      await api.saveConfig(config);
+      setDirty(false);
+    } catch (e) {
+      // e.g. an invalid include/exclude regex rejected by save_config.
+      alert(`Couldn't save: ${e}`);
+    }
   }
 
   const patchConfig = (patch: Partial<Config>) => {
@@ -851,6 +894,20 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
               value={card.extensions}
               onChange={(v) => updateCard(i, { extensions: v })}
             />
+            <RegexField
+              label="Only files matching (optional)"
+              help="Regex on the file name — copy only files that match. Blank = all. Case-sensitive; start with (?i) to ignore case."
+              placeholder="^IMG_\d+"
+              value={card.include}
+              onChange={(v) => updateCard(i, { include: v })}
+            />
+            <RegexField
+              label="Skip files matching (optional)"
+              help="Regex on the file name — skip files that match, even if included above. Blank = skip none."
+              placeholder="_thumb|\.tmp$"
+              value={card.exclude}
+              onChange={(v) => updateCard(i, { exclude: v })}
+            />
           </Group>
 
           <Group title="Where photos go">
@@ -1172,6 +1229,23 @@ function FoldersView({ config, patch }: { config: Config; patch: (p: Partial<Con
             placeholder={rule.kind === "photos" ? "jpg, jpeg, tiff, heif" : "jpg, pdf, zip"}
             value={rule.extensions}
             onChange={(v) => update(i, { extensions: v })}
+          />
+
+          <RegexField
+            label="Only files matching (optional)"
+            help={`Regex on the file name — only ${
+              rule.kind === "photos" ? "import" : "move"
+            } files that match. Blank = all. Case-sensitive; start with (?i) to ignore case.`}
+            placeholder="^IMG_\d+"
+            value={rule.include}
+            onChange={(v) => update(i, { include: v })}
+          />
+          <RegexField
+            label="Skip files matching (optional)"
+            help={`Regex on the file name — skip files that match, even if included above. Blank = skip none.`}
+            placeholder="_thumb|\.tmp$"
+            value={rule.exclude}
+            onChange={(v) => update(i, { exclude: v })}
           />
 
           {rule.kind === "folder" ? (

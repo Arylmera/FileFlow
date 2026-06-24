@@ -6,6 +6,7 @@ use fileflow_core::ingest::{
     cleanup, plan_ingest, run_ingest, scan_dates, scan_files, FailedCopy, IngestReport,
 };
 use fileflow_core::photos::{after_import, album_groups, build_import_script, scan_folder};
+use fileflow_core::util::NameFilter;
 use fileflow_core::{config::Config, layout};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -23,6 +24,8 @@ fn rule(sources: &[&str], dest: &str, exts: &[&str]) -> CardRule {
         eject: EjectPolicy::Never,
         extensions: exts.iter().map(|s| s.to_string()).collect(),
         rename: String::new(),
+        include: String::new(),
+        exclude: String::new(),
         routes: vec![],
     }
 }
@@ -448,6 +451,8 @@ fn folder_rule(watch: &str, dest: &str) -> FolderRule {
         label: "t".into(),
         watch: watch.into(),
         extensions: vec![],
+        include: String::new(),
+        exclude: String::new(),
         target: fileflow_core::config::Destination::Folder {
             dest: dest.into(),
             layout: "{date}".into(),
@@ -533,7 +538,7 @@ fn scan_folder_skips_files_still_being_written() {
     write_file(&root.join("settled.jpg"), b"x", DAY_A); // old mtime → settled
     std::fs::write(root.join("writing.jpg"), b"x").unwrap(); // fresh mtime → skipped
 
-    let files = scan_folder(root, &["jpg".into()]);
+    let files = scan_folder(root, &["jpg".into()], &NameFilter::default());
     assert_eq!(files.len(), 1, "only the settled file is returned");
     assert_eq!(files[0].file_name().unwrap(), "settled.jpg");
 }
@@ -556,7 +561,63 @@ fn scan_folder_skips_a_file_that_grows_during_the_recheck() {
         f.write_all(b"...the rest of a big file...").unwrap();
     });
 
-    let files = scan_folder(&root, &["jpg".into()]);
+    let files = scan_folder(&root, &["jpg".into()], &NameFilter::default());
     writer.join().unwrap();
     assert!(files.is_empty(), "a file still growing across the re-check is skipped");
+}
+
+#[test]
+fn name_filter_include_exclude_and_fail_closed() {
+    let f = NameFilter::compile("^IMG_", "_thumb").unwrap();
+    assert!(f.accepts(Path::new("/x/IMG_1.jpg")));
+    assert!(!f.accepts(Path::new("/x/other.jpg")), "not matched by include");
+    assert!(!f.accepts(Path::new("/x/IMG_1_thumb.jpg")), "matched by exclude wins");
+
+    // Unset filter (and Default) accept everything.
+    assert!(NameFilter::default().accepts(Path::new("/x/anything.bin")));
+
+    // Invalid regex: compile errors, and compile_or_deny denies everything (fail closed).
+    assert!(NameFilter::compile("(", "").is_err());
+    assert!(!NameFilter::compile_or_deny("(", "").accepts(Path::new("/x/anything.bin")));
+}
+
+#[test]
+fn scan_files_whitelists_and_blacklists_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("DCIM/100MSDCF/IMG_001.jpg"), b"a", DAY_A);
+    write_file(&root.join("DCIM/100MSDCF/IMG_001_thumb.jpg"), b"b", DAY_A);
+    write_file(&root.join("DCIM/100MSDCF/scratch.jpg"), b"c", DAY_A);
+
+    let mut r = rule(&["DCIM/100MSDCF"], "/tmp/out", &["jpg"]);
+    r.include = "^IMG_".into(); // only IMG_*
+    r.exclude = "_thumb".into(); // …but not thumbnails
+    let names: Vec<_> = scan_files(&r, root)
+        .iter()
+        .map(|p| p.file_name().unwrap().to_str().unwrap().to_string())
+        .collect();
+    assert_eq!(names, vec!["IMG_001.jpg"], "whitelist ∩ not-blacklist");
+}
+
+#[test]
+fn scan_files_bad_regex_moves_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("DCIM/100MSDCF/IMG_001.jpg"), b"a", DAY_A);
+    let mut r = rule(&["DCIM/100MSDCF"], "/tmp/out", &["jpg"]);
+    r.include = "(".into(); // invalid → deny all (fail closed)
+    assert!(scan_files(&r, root).is_empty());
+}
+
+#[test]
+fn scan_folder_applies_name_filter() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("keep.jpg"), b"x", DAY_A);
+    write_file(&root.join("draft_skip.jpg"), b"x", DAY_A);
+
+    let filter = NameFilter::compile("", "^draft_").unwrap();
+    let files = scan_folder(root, &["jpg".into()], &filter);
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].file_name().unwrap(), "keep.jpg");
 }

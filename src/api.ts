@@ -26,6 +26,10 @@ export interface CardRule {
   cleanup: CleanupPolicy;
   eject: EjectPolicy;
   extensions: string[];
+  // Regex name filters: only copy files matching `include` (blank = all), and never
+  // copy files matching `exclude` (blank = none). Both test the file name.
+  include: string;
+  exclude: string;
   routes: Route[];
   rename: string;
 }
@@ -45,6 +49,9 @@ export interface FolderRule {
   watch: string;
   kind: FolderKind;
   extensions: string[];
+  // Regex name filters (see CardRule): include = whitelist, exclude = blacklist.
+  include: string;
+  exclude: string;
   // Folder destination
   dest: string;
   layout: string;
@@ -134,6 +141,8 @@ export const emptyConfig: Config = {
 
 // Shared defaults for the per-kind fields a rule doesn't use.
 const folderDefaults = {
+  include: "",
+  exclude: "",
   album_mode: "fixed" as AlbumMode,
   photos_album: "Lightroom",
   skip_duplicates: true,
@@ -180,6 +189,8 @@ export function newCard(): CardRule {
     cleanup: "ask",
     eject: "never",
     extensions: ["arw", "jpg"],
+    include: "",
+    exclude: "",
     routes: [],
     rename: "",
   };

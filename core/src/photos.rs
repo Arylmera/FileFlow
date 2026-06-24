@@ -2,7 +2,7 @@
 
 use crate::config::AfterImport;
 use crate::ingest::DateGroup;
-use crate::util::{ext_matches, is_hidden, move_file};
+use crate::util::{ext_matches, is_hidden, move_file, NameFilter};
 use crate::{layout, Error, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -26,7 +26,8 @@ fn quiet_len(p: &Path) -> Option<u64> {
     }
 }
 
-/// List top-level files in an export folder that match `extensions` (non-recursive).
+/// List top-level files in an export folder that match `extensions` and pass `filter`
+/// (the regex whitelist/blacklist), non-recursive.
 /// Subdirectories (e.g. an `_imported` archive) are skipped by design.
 ///
 /// A file is returned only once it looks finished: quiet for ~2s AND its size is unchanged
@@ -35,12 +36,12 @@ fn quiet_len(p: &Path) -> Option<u64> {
 /// and picked up whole on the next watcher fire, so a half-written file is never imported.
 // ponytail: mtime-quiet + size-stable; a write that stalls for the entire re-check window
 // mid-file could still slip through. Add a writer marker (e.g. a `.part` rename) only if so.
-pub fn scan_folder(folder: &Path, extensions: &[String]) -> Vec<PathBuf> {
+pub fn scan_folder(folder: &Path, extensions: &[String], filter: &NameFilter) -> Vec<PathBuf> {
     let mut candidates: Vec<(PathBuf, u64)> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(folder) {
         for e in rd.flatten() {
             let p = e.path();
-            if p.is_file() && !is_hidden(&p) && ext_matches(&p, extensions) {
+            if p.is_file() && !is_hidden(&p) && ext_matches(&p, extensions) && filter.accepts(&p) {
                 if let Some(len) = quiet_len(&p) {
                     candidates.push((p, len));
                 }
