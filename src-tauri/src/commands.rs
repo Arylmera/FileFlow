@@ -15,6 +15,7 @@ pub struct MountedCard {
     pub uuid: Option<String>,
     pub matched: bool, // matches a configured card rule
     pub rule_label: Option<String>,
+    pub ejectable: bool, // false for the boot disk
 }
 
 #[tauri::command]
@@ -47,10 +48,11 @@ pub fn list_mounted_cards(state: State<AppState>) -> Vec<MountedCard> {
                     .and_then(|n| n.to_str())
                     .unwrap_or("")
                     .to_string(),
-                path,
-                uuid,
                 matched: rule.is_some(),
                 rule_label: rule.map(|r| r.label.clone()),
+                ejectable: !volume::is_boot_volume(&path),
+                uuid,
+                path,
             }
         })
         .collect();
@@ -100,6 +102,9 @@ pub fn run_ingest_now(
 /// Manually eject a mounted volume by its mount path. Independent of any rule.
 #[tauri::command]
 pub fn eject_now(path: PathBuf) -> Result<(), String> {
+    if volume::is_boot_volume(&path) {
+        return Err("refusing to eject the boot disk".into());
+    }
     ingest::eject(&path, EjectPolicy::Always).map_err(|e| e.to_string())?;
     Ok(())
 }

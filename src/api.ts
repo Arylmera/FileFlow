@@ -78,6 +78,7 @@ export interface MountedCard {
   uuid: string | null;
   matched: boolean;
   rule_label: string | null;
+  ejectable: boolean;
 }
 
 export interface ActivityEntry {

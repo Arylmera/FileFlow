@@ -23,6 +23,12 @@ pub fn mounted_volumes() -> HashSet<PathBuf> {
     out
 }
 
+/// True if `path` resolves to the boot volume (`/`). The boot disk surfaces in
+/// `/Volumes` as a symlink, so we canonicalize before comparing. Never eject it.
+pub fn is_boot_volume(path: &Path) -> bool {
+    std::fs::canonicalize(path).map(|p| p == Path::new("/")).unwrap_or(false)
+}
+
 /// Find a currently-mounted volume whose UUID matches `uuid` (case-insensitive).
 pub fn find_volume_by_uuid(uuid: &str) -> Option<PathBuf> {
     mounted_volumes()

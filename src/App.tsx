@@ -674,7 +674,7 @@ function StatusView({
             </span>
             <span className="row">
               {c.matched && c.uuid && <button onClick={() => importNow(c.uuid!)}>Import now</button>}
-              <button onClick={() => ejectNow(c.path)}>Eject</button>
+              {c.ejectable && <button onClick={() => ejectNow(c.path)}>Eject</button>}
             </span>
           </li>
         ))}
