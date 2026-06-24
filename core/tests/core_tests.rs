@@ -483,6 +483,24 @@ fn folder_move_relocates_into_dated_dest() {
 }
 
 #[test]
+fn folder_move_emits_final_progress_tick() {
+    // The UI strip clears only on done >= total, so the last callback must be (total, total).
+    let dir = tempfile::tempdir().unwrap();
+    let watch = dir.path().join("incoming");
+    let dest = dir.path().join("sorted");
+    std::fs::create_dir_all(&watch).unwrap();
+    std::fs::create_dir_all(&dest).unwrap();
+    write_file(&watch.join("a.jpg"), b"x", DAY_A);
+
+    let mut ticks = Vec::new();
+    run_folder_move(&folder_rule(watch.to_str().unwrap(), dest.to_str().unwrap()), |d, t| {
+        ticks.push((d, t))
+    })
+    .unwrap();
+    assert_eq!(ticks.last(), Some(&(1, 1)), "final tick clears the progress strip");
+}
+
+#[test]
 fn folder_move_errors_when_dest_unavailable() {
     let dir = tempfile::tempdir().unwrap();
     let watch = dir.path().join("incoming");
@@ -575,6 +593,17 @@ fn name_filter_include_exclude_and_fail_closed() {
 
     // Unset filter (and Default) accept everything.
     assert!(NameFilter::default().accepts(Path::new("/x/anything.bin")));
+
+    // An unset filter is a true no-op — it accepts even non-UTF8 names (which a regex
+    // can't be tested against). Once a pattern is set, an untestable name is rejected.
+    #[cfg(unix)]
+    {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let bad = PathBuf::from(OsStr::from_bytes(b"/x/\xff\xfe.jpg"));
+        assert!(NameFilter::default().accepts(&bad), "no patterns set = pass-through");
+        assert!(!NameFilter::compile("^IMG_", "").unwrap().accepts(&bad));
+    }
 
     // Invalid regex: compile errors, and compile_or_deny denies everything (fail closed).
     assert!(NameFilter::compile("(", "").is_err());

@@ -828,7 +828,7 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
       )}
 
       {config.card.map((card, i) => (
-        <details key={i} className="card-edit" open>
+        <details key={i} className="card-edit">
           <summary className="card-head">
             <div>
               <strong>{card.label || "Untitled drive"}</strong>
@@ -896,14 +896,14 @@ function CardsView({ config, patch }: { config: Config; patch: (p: Partial<Confi
             />
             <RegexField
               label="Only files matching (optional)"
-              help="Regex on the file name — copy only files that match. Blank = all. Case-sensitive; start with (?i) to ignore case."
+              help="Regex matched against the file name, extension included (e.g. IMG_2024.jpg) — copy only matches. Contains-match; anchor with ^…$. Blank = all. Case-sensitive; prefix (?i) to ignore case."
               placeholder="^IMG_\d+"
               value={card.include}
               onChange={(v) => updateCard(i, { include: v })}
             />
             <RegexField
               label="Skip files matching (optional)"
-              help="Regex on the file name — skip files that match, even if included above. Blank = skip none."
+              help="Regex on the file name (extension included). Contains-match; anchor with ^…$. Skips matches even if included above. Blank = skip none."
               placeholder="_thumb|\.tmp$"
               value={card.exclude}
               onChange={(v) => updateCard(i, { exclude: v })}
@@ -1162,7 +1162,7 @@ function FoldersView({ config, patch }: { config: Config; patch: (p: Partial<Con
       )}
 
       {config.folder.map((rule, i) => (
-        <details key={i} className="card-edit" open>
+        <details key={i} className="card-edit">
           <summary className="card-head">
             <div>
               <strong>
@@ -1233,16 +1233,16 @@ function FoldersView({ config, patch }: { config: Config; patch: (p: Partial<Con
 
           <RegexField
             label="Only files matching (optional)"
-            help={`Regex on the file name — only ${
+            help={`Regex on the file name, extension included (e.g. IMG_2024.jpg) — only ${
               rule.kind === "photos" ? "import" : "move"
-            } files that match. Blank = all. Case-sensitive; start with (?i) to ignore case.`}
+            } matches. Contains-match; anchor with ^…$. Blank = all. Case-sensitive; prefix (?i) to ignore case.`}
             placeholder="^IMG_\d+"
             value={rule.include}
             onChange={(v) => update(i, { include: v })}
           />
           <RegexField
             label="Skip files matching (optional)"
-            help={`Regex on the file name — skip files that match, even if included above. Blank = skip none.`}
+            help={`Regex on the file name (extension included). Contains-match; anchor with ^…$. Skips matches even if included above. Blank = skip none.`}
             placeholder="_thumb|\.tmp$"
             value={rule.exclude}
             onChange={(v) => update(i, { exclude: v })}

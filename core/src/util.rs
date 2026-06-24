@@ -47,6 +47,11 @@ impl NameFilter {
         if self.deny_all {
             return false;
         }
+        // No patterns set → a true no-op: accept everything, including names that
+        // aren't valid UTF-8 (which only the regex test below would need to read).
+        if self.include.is_none() && self.exclude.is_none() {
+            return true;
+        }
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             return false;
         };

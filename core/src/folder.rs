@@ -62,5 +62,6 @@ pub fn run_folder_move(
             Err(e) => report.failed.push(FailedMove { src: f.clone(), error: e.to_string() }),
         }
     }
+    on_progress(total, total); // final tick clears the UI progress strip (see run_ingest)
     Ok(report)
 }
