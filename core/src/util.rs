@@ -55,8 +55,8 @@ impl NameFilter {
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             return false;
         };
-        let included = self.include.as_ref().map_or(true, |re| re.is_match(name));
-        let excluded = self.exclude.as_ref().map_or(false, |re| re.is_match(name));
+        let included = self.include.as_ref().map(|re| re.is_match(name)).unwrap_or(true);
+        let excluded = self.exclude.as_ref().is_some_and(|re| re.is_match(name));
         included && !excluded
     }
 }

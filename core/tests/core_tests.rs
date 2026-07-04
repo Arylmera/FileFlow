@@ -441,7 +441,7 @@ fn after_import_archive_moves_files() {
     write_file(&exp, b"img", DAY_A);
     let archive = dir.path().join("export/_imported");
 
-    after_import(&[exp.clone()], AfterImport::Archive, &archive).unwrap();
+    after_import(std::slice::from_ref(&exp), AfterImport::Archive, &archive).unwrap();
     assert!(!exp.exists(), "source moved out");
     assert!(archive.join("a.jpg").exists(), "file landed in archive");
 }
