@@ -120,7 +120,8 @@ APP=target/release/bundle/macos/FileFlow.app
 codesign --force --deep -s - "$APP"                       # re-seal ad-hoc — the bundler can leave it unsealed
 codesign --verify --deep --strict "$APP"                  # must pass, or the app launches as "damaged"
 tar -czf FileFlow.app.tar.gz -C "$(dirname "$APP")" FileFlow.app
-gh release create v0.1.0 FileFlow.app.tar.gz              # newest non-prerelease becomes "latest"
+shasum -a 256 FileFlow.app.tar.gz > FileFlow.app.tar.gz.sha256   # installer verifies this
+gh release create v0.1.0 FileFlow.app.tar.gz FileFlow.app.tar.gz.sha256
 ```
 
 The re-seal matters: an unsealed bundle (no `Contents/_CodeSignature`) fails Gatekeeper's

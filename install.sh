@@ -29,6 +29,18 @@ trap 'rm -rf "$TMP"' EXIT
 echo "==> Downloading…"
 curl -fsSL "$URL" -o "$TMP/$ASSET"
 
+# Verify against the release's .sha256 asset when one is published; older
+# releases without one install with a warning instead of breaking.
+if curl -fsSL "$URL.sha256" -o "$TMP/$ASSET.sha256" 2>/dev/null; then
+  echo "==> Verifying checksum…"
+  (cd "$TMP" && printf '%s  %s\n' "$(cut -d' ' -f1 "$ASSET.sha256")" "$ASSET" | shasum -a 256 -c -) || {
+    echo "Checksum mismatch — the download does not match the published release. Aborting." >&2
+    exit 1
+  }
+else
+  echo "==> No checksum published for this release; skipping verification."
+fi
+
 echo "==> Unpacking…"
 tar -xzf "$TMP/$ASSET" -C "$TMP"
 [ -d "$TMP/$APP" ] || { echo "Archive did not contain $APP." >&2; exit 1; }
