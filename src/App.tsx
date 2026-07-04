@@ -205,10 +205,13 @@ function RegexField({
       err = (e as Error).message;
     }
   }
+  // Patterns run in Rust's regex engine, which rejects lookarounds/backreferences —
+  // say so up front rather than letting a save fail mysteriously.
+  const dialect = "Rust regex syntax — lookarounds and backreferences aren't supported.";
   return (
     <Field
       label={label}
-      help={err ? undefined : help}
+      help={err ? undefined : help ? `${help} ${dialect}` : dialect}
       badge={err ? <span className="badge warn">invalid</span> : undefined}
     >
       <input placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
