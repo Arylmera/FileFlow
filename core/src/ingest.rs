@@ -243,10 +243,8 @@ pub fn plan_ingest(
 }
 
 /// Whole-file byte comparison. Callers pre-check equal length, so this only confirms
-/// that two same-sized files are truly identical.
-// ponytail: runs only when a dest of equal size already exists (re-imports, name
-// clashes), never on a fresh import. A persisted source→dest manifest would avoid
-// re-reading on repeated imports of an un-wiped card, if that ever gets slow.
+/// that two same-sized files are truly identical. Used both to prove an existing dest
+/// is a prior import (skip path) and to verify every fresh copy before it counts.
 fn files_equal(a: &Path, b: &Path, len: u64) -> bool {
     let (Ok(mut fa), Ok(mut fb)) = (std::fs::File::open(a), std::fs::File::open(b)) else {
         return false;
@@ -305,7 +303,7 @@ fn resolve_target(pc: &PlannedCopy, src_len: u64, claimed: &HashSet<PathBuf>) ->
     }
 }
 
-/// Execute the plan: create dirs, copy preserving mtime, verify by byte size.
+/// Execute the plan: create dirs, copy preserving mtime, verify size + full byte compare.
 /// A vanished/unreachable destination surfaces here as failed copies → cleanup is skipped.
 ///
 /// `on_progress(done, total)` is called before each file (done = files finished so far)
@@ -352,13 +350,20 @@ pub fn run_ingest(plan: &[PlannedCopy], mut on_progress: impl FnMut(usize, usize
             continue;
         }
 
-        // Verify by size; a short write leaves a bad dest, so remove it before failing.
-        let verified = std::fs::metadata(&dest_path).map(|m| m.len() == src_len).unwrap_or(false);
+        // Verify size, then bytes: this run's sources may be deleted afterwards, so a
+        // silently corrupted copy must never count as verified. A bad dest is removed
+        // before failing so a re-run gets a clean slot.
+        // ponytail: full re-read of src+dest per file; switch to a streaming hash
+        // computed during the copy if ingest throughput ever matters.
+        let verified = std::fs::metadata(&dest_path)
+            .map(|m| m.len() == src_len)
+            .unwrap_or(false)
+            && files_equal(&pc.src, &dest_path, src_len);
         if !verified {
             let _ = std::fs::remove_file(&dest_path);
             report.failed.push(FailedCopy {
                 src: pc.src.clone(),
-                error: "size mismatch after copy".into(),
+                error: "copy did not verify (size or content mismatch)".into(),
             });
             continue;
         }
@@ -418,5 +423,47 @@ pub fn eject(volume_root: &Path, policy: EjectPolicy) -> Result<bool> {
         Ok(true)
     } else {
         Err(Error::EjectFailed(volume_root.to_path_buf()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Fresh unique temp dir, removed on drop. std-only so core keeps zero dev-deps.
+    struct TempDir(PathBuf);
+    impl TempDir {
+        fn new() -> Self {
+            static N: AtomicUsize = AtomicUsize::new(0);
+            let dir = std::env::temp_dir().join(format!(
+                "fileflow-test-{}-{}",
+                std::process::id(),
+                N.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            TempDir(dir)
+        }
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    // The public ingest/cleanup pipeline is covered by tests/core_tests.rs; this module
+    // only tests what's private to this file.
+    #[test]
+    fn dest_inside_card_is_refused() {
+        let card = TempDir::new();
+        let inner = card.path().join("inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        assert!(matches!(
+            check_dest(&inner, card.path()),
+            Err(Error::DestInsideCard(_))
+        ));
     }
 }
