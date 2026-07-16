@@ -7,7 +7,7 @@ on:
 
 jobs:
   test:
-    # macOS: src-tauri only builds against macOS APIs (menu bar, FSEvents).
+    # macOS: the primary platform (menu bar, FSEvents, Apple Photos).
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,3 +34,39 @@ jobs:
           npm ci
           npx tsc --noEmit
           npx vite build
+
+  test-windows:
+    # Windows: run the same test/lint gauntlet against the Windows code paths,
+    # then prove the MSI installer actually builds.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Rust tests
+        run: cargo test --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build MSI installer
+        # `tauri build` runs the frontend typecheck + build via beforeBuildCommand.
+        run: |
+          npm ci
+          npm run build:msi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FileFlow-msi
+          path: target/release/bundle/msi/*.msi
+          if-no-files-found: error

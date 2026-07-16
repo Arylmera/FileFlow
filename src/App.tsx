@@ -227,10 +227,12 @@ export default function App() {
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [naming, setNaming] = useState<NamingReq | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
+  const [platform, setPlatform] = useState("macos");
 
   useEffect(() => {
     api.getConfig().then(setConfig);
     api.getActivity(100).then(setActivity);
+    api.getPlatform().then(setPlatform);
 
     const unlisten = [
       // Keep the bar while files remain; the final (total, total) event clears it.
@@ -302,9 +304,13 @@ export default function App() {
           />
         )}
         {tab === "cards" && <CardsView config={config} patch={patchConfig} />}
-        {tab === "folders" && <FoldersView config={config} patch={patchConfig} />}
+        {tab === "folders" && (
+          <FoldersView config={config} patch={patchConfig} isMac={platform === "macos"} />
+        )}
         {tab === "activity" && <ActivityView activity={activity} />}
-        {tab === "settings" && <SettingsView config={config} patch={patchConfig} />}
+        {tab === "settings" && (
+          <SettingsView config={config} patch={patchConfig} isMac={platform === "macos"} />
+        )}
       </main>
 
       {naming && (
@@ -1127,7 +1133,15 @@ function DestField({
   );
 }
 
-function FoldersView({ config, patch }: { config: Config; patch: (p: Partial<Config>) => void }) {
+function FoldersView({
+  config,
+  patch,
+  isMac,
+}: {
+  config: Config;
+  patch: (p: Partial<Config>) => void;
+  isMac: boolean;
+}) {
   const update = (i: number, p: Partial<FolderRule>) =>
     patch({ folder: config.folder.map((r, j) => (j === i ? { ...r, ...p } : r)) });
   const remove = (i: number) => patch({ folder: config.folder.filter((_, j) => j !== i) });
@@ -1146,12 +1160,14 @@ function FoldersView({ config, patch }: { config: Config; patch: (p: Partial<Con
         <div>
           <h2>Folders</h2>
           <p className="subtitle">
-            Watch a folder and route new files — move them into a dated folder, or import them into Apple Photos.
+            {isMac
+              ? "Watch a folder and route new files — move them into a dated folder, or import them into Apple Photos."
+              : "Watch a folder and route new files — move them into a dated folder."}
           </p>
         </div>
         <div className="row">
           <button onClick={addFolder}>+ To folder</button>
-          <button onClick={addPhotos}>+ To Photos</button>
+          {isMac && <button onClick={addPhotos}>+ To Photos</button>}
         </div>
       </header>
 
@@ -1159,7 +1175,9 @@ function FoldersView({ config, patch }: { config: Config; patch: (p: Partial<Con
         <div className="empty">
           <p>No folder rules yet.</p>
           <p className="hint">
-            Add a rule to auto-sort a folder, or import a Lightroom export into Photos.
+            {isMac
+              ? "Add a rule to auto-sort a folder, or import a Lightroom export into Photos."
+              : "Add a rule to auto-sort a folder."}
           </p>
         </div>
       )}
@@ -1218,7 +1236,12 @@ function FoldersView({ config, patch }: { config: Config; patch: (p: Partial<Con
           <Field label="Destination" help="What to do with new files in this folder.">
             <select value={rule.kind} onChange={(e) => flipKind(i, e.target.value as FolderKind)}>
               <option value="folder">Move to a folder</option>
-              <option value="photos">Import into Apple Photos</option>
+              {/* Apple Photos only exists on macOS; keep the option visible for an
+                  existing photos rule (e.g. a config copied from a Mac) so the select
+                  doesn't render blank. */}
+              {(isMac || rule.kind === "photos") && (
+                <option value="photos">Import into Apple Photos</option>
+              )}
             </select>
           </Field>
 
@@ -1427,9 +1450,18 @@ function ActivityView({ activity }: { activity: ActivityEntry[] }) {
   );
 }
 
-function SettingsView({ config, patch }: { config: Config; patch: (p: Partial<Config>) => void }) {
+function SettingsView({
+  config,
+  patch,
+  isMac,
+}: {
+  config: Config;
+  patch: (p: Partial<Config>) => void;
+  isMac: boolean;
+}) {
   const [autostart, setAutostart] = useState<boolean | null>(null);
   const [version, setVersion] = useState("");
+  const trayName = isMac ? "menu bar" : "system tray";
   useEffect(() => {
     isEnabled().then(setAutostart).catch(() => setAutostart(false));
     import("@tauri-apps/api/app").then((m) => m.getVersion()).then(setVersion).catch(() => {});
@@ -1459,7 +1491,7 @@ function SettingsView({ config, patch }: { config: Config; patch: (p: Partial<Co
         />
         Launch at login
       </label>
-      <p className="help check-help">Start FileFlow automatically and keep it in the menu bar.</p>
+      <p className="help check-help">Start FileFlow automatically and keep it in the {trayName}.</p>
 
       <label className="check">
         <input
@@ -1469,34 +1501,40 @@ function SettingsView({ config, patch }: { config: Config; patch: (p: Partial<Co
             patch({ app: { ...config.app, keep_running_on_close: e.target.checked } })
           }
         />
-        Keep running in the menu bar when the window is closed
+        Keep running in the {trayName} when the window is closed
       </label>
       <p className="help check-help">When off, closing the window quits FileFlow.</p>
 
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={config.app.show_tray_icon}
-          disabled={config.app.show_tray_icon && !config.app.show_dock_icon}
-          onChange={(e) =>
-            patch({ app: { ...config.app, show_tray_icon: e.target.checked } })
-          }
-        />
-        Show menu-bar icon
-      </label>
+      {/* The Dock (and hiding the tray icon in its favour) is macOS-only; elsewhere
+          the tray icon is the app's one surface and always stays on. */}
+      {isMac && (
+        <>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={config.app.show_tray_icon}
+              disabled={config.app.show_tray_icon && !config.app.show_dock_icon}
+              onChange={(e) =>
+                patch({ app: { ...config.app, show_tray_icon: e.target.checked } })
+              }
+            />
+            Show menu-bar icon
+          </label>
 
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={config.app.show_dock_icon}
-          disabled={config.app.show_dock_icon && !config.app.show_tray_icon}
-          onChange={(e) =>
-            patch({ app: { ...config.app, show_dock_icon: e.target.checked } })
-          }
-        />
-        Show Dock icon
-      </label>
-      <p className="help check-help">Keep at least one of the menu-bar or Dock icon visible.</p>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={config.app.show_dock_icon}
+              disabled={config.app.show_dock_icon && !config.app.show_tray_icon}
+              onChange={(e) =>
+                patch({ app: { ...config.app, show_dock_icon: e.target.checked } })
+              }
+            />
+            Show Dock icon
+          </label>
+          <p className="help check-help">Keep at least one of the menu-bar or Dock icon visible.</p>
+        </>
+      )}
 
       <Field label="Log level" help="How much detail is written to the log file. “info” is usually enough.">
         <select

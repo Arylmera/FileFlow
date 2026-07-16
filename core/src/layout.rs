@@ -20,12 +20,34 @@ fn substitute(template: &str, tokens: &[(&str, &str)]) -> String {
 /// naming form) can never climb out of the destination root — the result is always a
 /// relative path with no traversal components.
 pub fn render(template: &str, year: &str, date: &str, name: &str) -> String {
+    // On Windows the rendered segments must also be legal NTFS/exFAT names, or the
+    // path we verify against desyncs from the path the filesystem actually creates.
+    #[cfg(windows)]
+    return render_windows_safe(template, year, date, name);
+    #[cfg(not(windows))]
+    render_segments(template, year, date, name).join("/")
+}
+
+/// Like [`render`], but every segment is passed through
+/// [`crate::windows::sanitize_segment`] — what [`render`] does on Windows builds.
+/// Exposed on all platforms so the behaviour is testable everywhere.
+pub fn render_windows_safe(template: &str, year: &str, date: &str, name: &str) -> String {
+    render_segments(template, year, date, name)
+        .iter()
+        .map(|s| crate::windows::sanitize_segment(s))
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Substitute tokens and split into cleaned segments (shared by both renderers).
+fn render_segments(template: &str, year: &str, date: &str, name: &str) -> Vec<String> {
     let raw = substitute(template, &[("{year}", year), ("{date}", date), ("{name}", name)]);
     raw.split('/')
         .map(str::trim)
         .filter(|s| !s.is_empty() && *s != "." && *s != "..")
-        .collect::<Vec<_>>()
-        .join("/")
+        .map(str::to_string)
+        .collect()
 }
 
 /// Render a filename template like `{date}_{seq}` into a single filename.
@@ -53,6 +75,12 @@ pub fn render_filename(
     // A bare "." or ".." would resolve to the dest dir or its parent once joined — never a
     // real filename. Fall back to the sequence, same as an empty render.
     let stem = if stem.is_empty() || stem == "." || stem == ".." { seq_str.as_str() } else { stem };
+    // Same Windows-legality rule as folder segments in [`render`].
+    #[cfg(windows)]
+    let stem = {
+        let s = crate::windows::sanitize_segment(stem);
+        if s.is_empty() { seq_str.clone() } else { s }
+    };
     if ext.is_empty() {
         stem.to_string()
     } else {

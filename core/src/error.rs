@@ -29,6 +29,15 @@ pub enum Error {
     #[error("Photos automation not authorized — grant access in System Settings ▸ Privacy & Security ▸ Automation")]
     PhotosNotAuthorized,
 
+    /// A Photos rule ran on a platform without Apple Photos. Fails loudly so files
+    /// are never silently left behind.
+    #[error("Apple Photos import is only available on macOS")]
+    PhotosUnsupported,
+
+    /// Eject requested on a platform with no eject backend (e.g. Linux dev builds).
+    #[error("ejecting drives is not supported on this platform")]
+    EjectUnsupported,
+
     #[error("osascript error: {0}")]
     Osascript(String),
 

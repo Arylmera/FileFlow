@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::process::Command;
 use walkdir::WalkDir;
 
@@ -60,12 +61,19 @@ impl IngestReport {
     }
 }
 
-/// Expand a leading `~` to `$HOME`. (ponytail: only `~`; add `${VAR}` if a config needs it.)
+/// Expand a leading `~` to the user's home directory — `$HOME` on Unix, falling back
+/// to `%USERPROFILE%` on Windows. (ponytail: only `~`; add `${VAR}` if a config needs it.)
 pub fn expand(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix('~') {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(format!("{home}{rest}"));
-        }
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok();
+    expand_with_home(path, home.as_deref())
+}
+
+/// Pure body of [`expand`]: substitute a leading `~` with `home` (no-op when `None`).
+pub fn expand_with_home(path: &str, home: Option<&str>) -> PathBuf {
+    if let (Some(rest), Some(home)) = (path.strip_prefix('~'), home) {
+        return PathBuf::from(format!("{home}{rest}"));
     }
     PathBuf::from(path)
 }
@@ -414,16 +422,48 @@ pub fn cleanup(report: &IngestReport) -> Result<CleanupReport> {
 
 /// Unmount/eject the card. Caller decides *whether* (policy + confirmation) and only
 /// ever after a fully successful import. Eject failure is a warning, not a data risk.
+///
+/// macOS ejects via `diskutil`; Windows via the Shell.Application COM verb (the same
+/// path as Explorer's Eject). Other platforms have no backend and error explicitly.
 pub fn eject(volume_root: &Path, policy: EjectPolicy) -> Result<bool> {
     if policy == EjectPolicy::Never {
         return Ok(false);
     }
+    eject_backend(volume_root)
+}
+
+#[cfg(target_os = "macos")]
+fn eject_backend(volume_root: &Path) -> Result<bool> {
     let status = Command::new("diskutil").arg("eject").arg(volume_root).status()?;
     if status.success() {
         Ok(true)
     } else {
         Err(Error::EjectFailed(volume_root.to_path_buf()))
     }
+}
+
+#[cfg(target_os = "windows")]
+fn eject_backend(volume_root: &Path) -> Result<bool> {
+    // `E:\` → `E:` — the COM verb wants the bare drive letter.
+    let letter = volume_root
+        .to_string_lossy()
+        .trim_end_matches(['\\', '/'])
+        .to_string();
+    let script = crate::windows::eject_script(&letter)
+        .ok_or_else(|| Error::EjectFailed(volume_root.to_path_buf()))?;
+    let status = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .status()?;
+    if status.success() {
+        Ok(true)
+    } else {
+        Err(Error::EjectFailed(volume_root.to_path_buf()))
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn eject_backend(_volume_root: &Path) -> Result<bool> {
+    Err(Error::EjectUnsupported)
 }
 
 #[cfg(test)]

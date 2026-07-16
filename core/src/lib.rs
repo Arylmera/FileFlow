@@ -12,5 +12,6 @@ pub mod ingest;
 pub mod layout;
 pub mod photos;
 pub mod util;
+pub mod windows;
 
 pub use error::{Error, Result};

@@ -31,6 +31,15 @@
       "minimumSystemVersion": "11.0",
       "entitlements": "entitlements.plist"
     },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "wix": {
+        "upgradeCode": "fa0c1b45-ebcc-4a41-9791-70bb8312731e",
+        "language": ["en-US"]
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -223,3 +223,11 @@ export const getPaused = () => load<boolean>("get_paused", {}, false);
 export const setPaused = (paused: boolean) => invoke<void>("set_paused", { paused });
 export const revealInFinder = (path: string) => invoke<void>("reveal_in_finder", { path });
 export const logPath = () => invoke<string>("log_path");
+
+// The OS the shell was built for ("macos" | "windows" | "linux"). Cached — it can't
+// change while the app runs. Drives platform-only UI (Apple Photos, Dock wording).
+let platformCache: string | null = null;
+export async function getPlatform(): Promise<string> {
+  platformCache ??= await load<string>("get_platform", {}, "macos");
+  return platformCache;
+}
