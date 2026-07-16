@@ -1,0 +1,231 @@
+/* ---------------------------------------------------------------------------
+   Design tokens & themes.
+
+   Structural tokens (spacing, radius, motion, layers) never change per theme.
+   Color tokens are defined once per theme, selected by the data-theme attribute
+   theme.ts sets on <html>. "System" is resolved to daylight/midnight in JS; the
+   media-query block below only covers the first frame before that runs.
+
+   Token contract every theme must fill:
+     --bg --surface --border --text --muted
+     --accent --on-accent --ok --warn
+     --hover --soft --ring --shadow --shadow-sm
+     --flow-drive --flow-photos --flow-folder --backdrop
+   plus the color-scheme property (native controls, scrollbars).
+--------------------------------------------------------------------------- */
+
+:root {
+  /* spacing scale */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 22px;
+  --s6: 32px;
+
+  /* radius, motion, layers */
+  --r: 8px;
+  --r-lg: 14px;
+  --t: 150ms cubic-bezier(0.2, 0.6, 0.2, 1);
+  --z-backdrop: 100;
+  --z-modal: 110;
+
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13.5px;
+  color: var(--text);
+  accent-color: var(--accent);
+}
+
+/* --- Daylight — the classic light look (also the pre-JS default) ---------- */
+:root,
+:root[data-theme="daylight"] {
+  color-scheme: light;
+
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --border: #e4e6ec;
+  --text: #1c1d22;
+  --muted: #696b76;
+
+  --accent: #3b6fe0;
+  --on-accent: #ffffff;
+  --ok: #1a8f3c;
+  --warn: #c2410c;
+
+  --hover: rgba(20, 25, 50, 0.05);
+  --soft: rgba(59, 111, 224, 0.1);
+  --ring: rgba(59, 111, 224, 0.28);
+  --shadow: 0 10px 30px rgba(20, 25, 50, 0.08);
+  --shadow-sm: 0 1px 2px rgba(20, 25, 50, 0.06);
+
+  --flow-drive: #3b6fe0;
+  --flow-photos: #5e5ce6;
+  --flow-folder: #0d9488;
+  --backdrop: rgba(10, 12, 24, 0.5);
+}
+
+/* --- Midnight — low-glare dark ------------------------------------------- */
+/* Duplicated in the media query so the first frame (before theme.ts sets
+   data-theme) already matches an OS in dark mode. Keep the two in sync. */
+:root[data-theme="midnight"] {
+  color-scheme: dark;
+
+  --bg: #15161a;
+  --surface: #212229;
+  --border: #34353f;
+  --text: #f1f2f6;
+  --muted: #9a9caa;
+
+  --accent: #5b8dff;
+  --on-accent: #ffffff;
+  --ok: #30d158;
+  --warn: #ffb02e;
+
+  --hover: rgba(255, 255, 255, 0.06);
+  --soft: rgba(91, 141, 255, 0.16);
+  --ring: rgba(91, 141, 255, 0.36);
+  --shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+
+  --flow-drive: #4a7df0;
+  --flow-photos: #6f6cf0;
+  --flow-folder: #0fa89a;
+  --backdrop: rgba(0, 0, 0, 0.55);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+
+    --bg: #15161a;
+    --surface: #212229;
+    --border: #34353f;
+    --text: #f1f2f6;
+    --muted: #9a9caa;
+
+    --accent: #5b8dff;
+    --on-accent: #ffffff;
+    --ok: #30d158;
+    --warn: #ffb02e;
+
+    --hover: rgba(255, 255, 255, 0.06);
+    --soft: rgba(91, 141, 255, 0.16);
+    --ring: rgba(91, 141, 255, 0.36);
+    --shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+
+    --flow-drive: #4a7df0;
+    --flow-photos: #6f6cf0;
+    --flow-folder: #0fa89a;
+    --backdrop: rgba(0, 0, 0, 0.55);
+  }
+}
+
+/* --- Darkroom — safelight red on black, for night vision ------------------ */
+:root[data-theme="darkroom"] {
+  color-scheme: dark;
+
+  --bg: #100b0b;
+  --surface: #1c1414;
+  --border: #3a2626;
+  --text: #f4e9e6;
+  --muted: #a68f8a;
+
+  --accent: #e5484d;
+  --on-accent: #ffffff;
+  --ok: #4cc38a;
+  --warn: #ffb224;
+
+  --hover: rgba(255, 231, 225, 0.06);
+  --soft: rgba(229, 72, 77, 0.16);
+  --ring: rgba(229, 72, 77, 0.38);
+  --shadow: 0 16px 40px rgba(0, 0, 0, 0.65);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+
+  --flow-drive: #e5484d;
+  --flow-photos: #b3446c;
+  --flow-folder: #9a6b2f;
+  --backdrop: rgba(12, 4, 4, 0.62);
+}
+
+/* --- Fjord — muted nordic blues -------------------------------------------
+   The accent is a light blue, so text placed on it is dark, not white. */
+:root[data-theme="fjord"] {
+  color-scheme: dark;
+
+  --bg: #242933;
+  --surface: #2e3440;
+  --border: #434c5e;
+  --text: #eceff4;
+  --muted: #9aa4b8;
+
+  --accent: #81a1c1;
+  --on-accent: #101623;
+  --ok: #5ea46a;
+  --warn: #d08770;
+
+  --hover: rgba(226, 236, 244, 0.05);
+  --soft: rgba(129, 161, 193, 0.14);
+  --ring: rgba(129, 161, 193, 0.35);
+  --shadow: 0 16px 40px rgba(8, 12, 20, 0.5);
+  --shadow-sm: 0 1px 2px rgba(8, 12, 20, 0.35);
+
+  --flow-drive: #5e81ac;
+  --flow-photos: #7d6a9c;
+  --flow-folder: #47857c;
+  --backdrop: rgba(14, 18, 26, 0.55);
+}
+
+/* --- Paper — warm sepia, like a print archive ------------------------------ */
+:root[data-theme="paper"] {
+  color-scheme: light;
+
+  --bg: #f2ecdf;
+  --surface: #fbf7ee;
+  --border: #e0d6c2;
+  --text: #38301f;
+  --muted: #82765d;
+
+  --accent: #7d5a1f;
+  --on-accent: #ffffff;
+  --ok: #3e7d47;
+  --warn: #b4511d;
+
+  --hover: rgba(90, 70, 30, 0.06);
+  --soft: rgba(125, 90, 31, 0.12);
+  --ring: rgba(125, 90, 31, 0.3);
+  --shadow: 0 10px 30px rgba(80, 60, 20, 0.1);
+  --shadow-sm: 0 1px 2px rgba(80, 60, 20, 0.08);
+
+  --flow-drive: #7d5a1f;
+  --flow-photos: #6b5090;
+  --flow-folder: #3d7a63;
+  --backdrop: rgba(46, 36, 16, 0.45);
+}
+
+/* --- Graphite — light monochrome, color reserved for state ----------------- */
+:root[data-theme="graphite"] {
+  color-scheme: light;
+
+  --bg: #ececee;
+  --surface: #ffffff;
+  --border: #dcdce0;
+  --text: #232326;
+  --muted: #6c6c74;
+
+  --accent: #55555e;
+  --on-accent: #ffffff;
+  --ok: #1a8f3c;
+  --warn: #c2410c;
+
+  --hover: rgba(30, 30, 40, 0.05);
+  --soft: rgba(85, 85, 94, 0.1);
+  --ring: rgba(85, 85, 94, 0.3);
+  --shadow: 0 10px 30px rgba(25, 25, 35, 0.08);
+  --shadow-sm: 0 1px 2px rgba(25, 25, 35, 0.06);
+
+  --flow-drive: #55555e;
+  --flow-photos: #66667e;
+  --flow-folder: #4f7a72;
+  --backdrop: rgba(20, 20, 26, 0.5);
+}
