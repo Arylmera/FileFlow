@@ -1,0 +1,102 @@
+name: Release
+
+# Cuts a release: builds the macOS app bundle (the asset install.sh downloads)
+# and the Windows MSI, then creates the tag + GitHub release with both attached.
+# Dispatch from the Actions tab (or API) with the tag to cut, e.g. v0.3.0.
+# Notes are read from docs/releases/<tag>.md when present, else auto-generated.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.3.0) — created at this run's commit if it doesn't exist"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build .app bundle
+        # `tauri build` runs the frontend typecheck + build via beforeBuildCommand.
+        run: |
+          npm ci
+          npx tauri build --bundles app
+
+      - name: Pack and checksum
+        # install.sh expects FileFlow.app.tar.gz and a sibling .sha256 in
+        # `shasum -a 256` format (hash, two spaces, filename).
+        run: |
+          tar -czf FileFlow.app.tar.gz -C target/release/bundle/macos FileFlow.app
+          shasum -a 256 FileFlow.app.tar.gz > FileFlow.app.tar.gz.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-app
+          path: |
+            FileFlow.app.tar.gz
+            FileFlow.app.tar.gz.sha256
+          if-no-files-found: error
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build MSI installer
+        run: |
+          npm ci
+          npm run build:msi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi
+          path: target/release/bundle/msi/*.msi
+          if-no-files-found: error
+
+  publish:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Create tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          notes="docs/releases/${TAG}.md"
+          if [ -f "$notes" ]; then
+            gh release create "$TAG" --target "$GITHUB_SHA" \
+              --title "FileFlow ${TAG#v}" --notes-file "$notes" assets/*
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" \
+              --title "FileFlow ${TAG#v}" --generate-notes assets/*
+          fi
