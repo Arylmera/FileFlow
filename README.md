@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/platform-macOS-000000?logo=apple&logoColor=white" alt="Platform: macOS">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-000000?logo=apple&logoColor=white" alt="Platform: macOS | Windows">
   <a href="https://tauri.app"><img src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white" alt="Tauri 2"></a>
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/Rust-1.77+-DEA584?logo=rust&logoColor=white" alt="Rust 1.77+"></a>
   <a href="https://react.dev"><img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19"></a>
@@ -11,8 +11,9 @@
 </p>
 
 <p align="center">
-  A quiet macOS menu-bar app that moves your files where they belong — automatically, and safely.<br>
-  Ingest a <b>drive into dated folders</b>, route <b>one folder into another</b>, or import straight <b>into Apple Photos</b>.
+  A quiet menu-bar / tray app that moves your files where they belong — automatically, and safely.<br>
+  Ingest a <b>drive into dated folders</b>, route <b>one folder into another</b>, or import straight <b>into Apple Photos</b>.<br>
+  Native on <b>macOS</b>, and on <b>Windows</b> via an MSI installer (Photos import is macOS-only).
 </p>
 
 <p align="center">
@@ -36,7 +37,7 @@ safe by default. Three flows, set up once from the control panel and then left a
 |---|---|---|
 | 💾 | **Drive → folder** | Plug in a recognised external drive (SD card, USB stick, …) and FileFlow copies its files into a destination, organized by capture date, verifies every copy, then — optionally — wipes and ejects the drive. Moves any file type by default; filter by extension if you want. |
 | 📁 | **Folder → folder** | Watch a folder; whatever lands in it is moved into a target folder, filtered by extension. |
-| 🖼️ | **Folder → Photos** | Point a watched folder (e.g. your Lightroom exports) at an Apple Photos album, and new files are imported automatically. |
+| 🖼️ | **Folder → Photos** | Point a watched folder (e.g. your Lightroom exports) at an Apple Photos album, and new files are imported automatically. *(macOS only.)* |
 
 A destination is **any writable path** — a local folder, a cloud-synced folder (OneDrive,
 iCloud Drive, Dropbox, Google Drive), a mounted network share (SMB/NFS, e.g. a TrueNAS
@@ -54,6 +55,20 @@ Your files are irreplaceable, so the destructive path — wiping a drive after i
 
 ## Install
 
+### Windows (MSI)
+
+Grab the latest `FileFlow_x.y.z_x64_en-US.msi` from the
+[releases page](https://github.com/Arylmera/FileFlow/releases) and run it. The installer
+takes care of everything, including fetching the WebView2 runtime on machines that don't
+have it yet. The build is unsigned, so SmartScreen may warn on first run — click
+**More info ▸ Run anyway**. Upgrades install over the previous version (same MSI upgrade
+code), keeping your config.
+
+On Windows, FileFlow lives in the **system tray**; the *Drive → folder* and
+*Folder → folder* flows work exactly as on macOS. *Folder → Photos* is macOS-only.
+
+### macOS
+
 FileFlow is a personal utility, not an App Store download. The fastest way in — one command, nothing else to do:
 
 ```sh
@@ -68,7 +83,9 @@ On first launch FileFlow lives in the **menu bar** (no Dock icon by default). Cl
 
 ## First-run setup
 
-Depending on which flows you use, FileFlow needs one or two macOS permissions. It detects when either is missing and surfaces guidance in the window — you don't have to hunt for them blind.
+On Windows no special permissions are needed — install and go.
+
+On macOS, depending on which flows you use, FileFlow needs one or two permissions. It detects when either is missing and surfaces guidance in the window — you don't have to hunt for them blind.
 
 | Permission | Why it's needed | Where to grant it |
 |---|---|---|
@@ -90,7 +107,8 @@ Settings live in a single config file, managed entirely from the UI — see [Fil
 
 ## Build from source
 
-**Prerequisites:** Rust ≥ 1.77, Node ≥ 18, Xcode Command Line Tools.
+**Prerequisites:** Rust ≥ 1.77, Node ≥ 18. On macOS: Xcode Command Line Tools; on
+Windows: the MSVC build tools (the Tauri bundler downloads WiX itself for the MSI).
 
 ```sh
 npm install
@@ -101,8 +119,9 @@ cargo test -p fileflow-core   # run the domain-logic tests
 Produce a release build:
 
 ```sh
-npm run tauri build      # → target/release/bundle/macos/FileFlow.app
+npm run tauri build      # macOS → target/release/bundle/macos/FileFlow.app
 npm run build:dmg        # also build the installer .dmg (GUI session only — see below)
+npm run build:msi        # Windows → target/release/bundle/msi/FileFlow_x.y.z_x64_en-US.msi
 ```
 
 The default build produces the `.app` only, which works headlessly. The **`.dmg`** step
@@ -150,15 +169,18 @@ it's inert for ad-hoc dev builds.
 
 ## Files & locations
 
-| | Path |
-|---|---|
-| **Config** | `~/Library/Application Support/com.guillaumelemer.fileflow/config.toml` — managed from the UI (*Settings ▸ Open config folder*). |
-| **Logs** | `~/Library/Logs/com.guillaumelemer.fileflow/fileflow.log` — *Settings ▸ Open log file*; verbosity via *Settings ▸ Log level*. |
+| | macOS | Windows |
+|---|---|---|
+| **Config** | `~/Library/Application Support/com.guillaumelemer.fileflow/config.toml` | `%APPDATA%\com.guillaumelemer.fileflow\config.toml` |
+| **Logs** | `~/Library/Logs/com.guillaumelemer.fileflow/fileflow.log` | `%LOCALAPPDATA%\com.guillaumelemer.fileflow\logs\fileflow.log` |
 
-By default the app runs as a menu-bar agent (no Dock icon), reachable from the tray.
-*Settings* toggles the Dock and menu-bar icons independently — at least one stays visible so
-the window is always reachable. It launches at login when enabled and enforces a single
-instance.
+Both are managed from the UI — *Settings ▸ Open config folder* / *Open log file*;
+verbosity via *Settings ▸ Log level*.
+
+By default the app runs as a menu-bar agent (no Dock icon) on macOS, and from the system
+tray on Windows. On macOS, *Settings* toggles the Dock and menu-bar icons independently —
+at least one stays visible so the window is always reachable. It launches at login when
+enabled and enforces a single instance.
 
 ## Architecture
 

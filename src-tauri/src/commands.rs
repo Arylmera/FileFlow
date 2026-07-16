@@ -173,16 +173,39 @@ pub fn set_paused(state: State<AppState>, paused: bool) {
     state.set_paused(paused);
 }
 
-/// Reveal a path in Finder (`~` expanded). Used by Settings' "Open config".
+/// Reveal a path in the platform file manager (`~` expanded) — Finder on macOS,
+/// Explorer on Windows. Used by Settings' "Open config". (The command keeps its
+/// historical name: it's the wire key the frontend invokes.)
 #[tauri::command]
 pub fn reveal_in_finder(path: String) -> Result<(), String> {
     let p = ingest::expand(&path);
-    std::process::Command::new("open")
-        .arg("-R")
-        .arg(&p)
+    reveal(&p).map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn reveal(p: &std::path::Path) -> std::io::Result<std::process::Child> {
+    std::process::Command::new("open").arg("-R").arg(p).spawn()
+}
+
+#[cfg(target_os = "windows")]
+fn reveal(p: &std::path::Path) -> std::io::Result<std::process::Child> {
+    std::process::Command::new("explorer")
+        .arg(fileflow_core::windows::explorer_select_arg(&p.to_string_lossy()))
         .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn reveal(p: &std::path::Path) -> std::io::Result<std::process::Child> {
+    // No "select" verb portable across Linux file managers; open the containing dir.
+    let dir = p.parent().unwrap_or(p);
+    std::process::Command::new("xdg-open").arg(dir).spawn()
+}
+
+/// The OS the shell was built for (`macos` | `windows` | `linux`), so the UI can hide
+/// platform-only flows (Apple Photos) and use the right file-manager wording.
+#[tauri::command]
+pub fn get_platform() -> &'static str {
+    std::env::consts::OS
 }
 
 #[tauri::command]

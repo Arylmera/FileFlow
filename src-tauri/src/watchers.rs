@@ -21,8 +21,9 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
 /// Kept in managed state purely to keep the watchers alive for the app's lifetime.
+/// `_volumes` is `None` on Windows, where drive arrivals are polled instead of watched.
 struct WatcherHandles {
-    _volumes: notify::RecommendedWatcher,
+    _volumes: Option<notify::RecommendedWatcher>,
     _folders: Vec<notify::RecommendedWatcher>,
 }
 
@@ -63,12 +64,37 @@ fn emit_progress(app: &AppHandle, flow: &'static str, label: &str, done: usize, 
 pub fn start(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
 
-    // --- /Volumes watcher: poke a worker that diffs the mount list ---
+    // Drive-arrival detection feeds the same diffing worker on every platform; only
+    // the poke source differs. macOS watches `/Volumes` (FSEvents); Windows has no
+    // mount directory to watch, so a thread polls the drive list on a short interval.
     let (vtx, vrx) = mpsc::channel::<()>();
-    let mut vol_watcher = notify::recommended_watcher(move |_res| {
-        let _ = vtx.send(());
-    })?;
-    vol_watcher.watch(Path::new("/Volumes"), RecursiveMode::NonRecursive)?;
+
+    #[cfg(target_os = "macos")]
+    let vol_watcher = {
+        let mut w = notify::recommended_watcher(move |_res| {
+            let _ = vtx.send(());
+        })?;
+        w.watch(Path::new("/Volumes"), RecursiveMode::NonRecursive)?;
+        Some(w)
+    };
+
+    #[cfg(not(target_os = "macos"))]
+    let vol_watcher = {
+        #[cfg(target_os = "windows")]
+        std::thread::spawn(move || {
+            // Exits when the receiver is dropped (app shutdown).
+            while vtx.send(()).is_ok() {
+                // Each poke shells out to PowerShell for the volume list, so poll
+                // gently — a card inserted between polls is picked up a few seconds
+                // later, which is invisible next to the copy itself.
+                std::thread::sleep(Duration::from_secs(5));
+            }
+        });
+        #[cfg(not(target_os = "windows"))]
+        drop(vtx); // no drive source on this platform; the worker idles forever
+        None
+    };
+
     {
         let h = handle.clone();
         std::thread::spawn(move || volume_worker(h, vrx));
@@ -265,6 +291,8 @@ fn handle_volume(app: &AppHandle, volume_root: &Path) {
     }
     if dates.is_empty() {
         // Distinguish "empty card" from "macOS blocked us reading the card".
+        // (Full Disk Access is a macOS-only concept; Windows reads cards directly.)
+        #[cfg(target_os = "macos")]
         if fda_blocked(volume_root) {
             notify(
                 app,
@@ -488,6 +516,7 @@ fn do_photos_import(
 
 /// Heuristic: a `PermissionDenied` reading the card root or its DCIM folder means
 /// macOS is withholding Full Disk Access, not that the card is empty.
+#[cfg(target_os = "macos")]
 fn fda_blocked(volume_root: &Path) -> bool {
     [volume_root.to_path_buf(), volume_root.join("DCIM")]
         .iter()

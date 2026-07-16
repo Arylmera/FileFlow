@@ -54,13 +54,19 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             let show = MenuItem::with_id(app, "show", "Open FileFlow", true, None::<&str>)?;
-            let import_lr =
-                MenuItem::with_id(app, "import_lr", "Import to Photos now", true, None::<&str>)?;
             let pause =
                 MenuItem::with_id(app, "toggle_pause", "Pause / Resume watchers", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
-            let menu = Menu::with_items(app, &[&show, &import_lr, &pause, &sep, &quit])?;
+            // Apple Photos only exists on macOS; don't offer the import elsewhere.
+            #[cfg(target_os = "macos")]
+            let menu = {
+                let import_lr =
+                    MenuItem::with_id(app, "import_lr", "Import to Photos now", true, None::<&str>)?;
+                Menu::with_items(app, &[&show, &import_lr, &pause, &sep, &quit])?
+            };
+            #[cfg(not(target_os = "macos"))]
+            let menu = Menu::with_items(app, &[&show, &pause, &sep, &quit])?;
 
             TrayIconBuilder::with_id("main-tray")
                 .icon(tauri::include_image!("icons/tray.png"))
@@ -167,6 +173,7 @@ pub fn run() {
             commands::set_paused,
             commands::reveal_in_finder,
             commands::log_path,
+            commands::get_platform,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

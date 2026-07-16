@@ -6,6 +6,7 @@ use crate::util::{ext_matches, is_hidden, move_file, NameFilter};
 use crate::{layout, Error, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
 use std::process::Command;
 use std::time::Duration;
 
@@ -162,6 +163,14 @@ pub fn album_groups(
     groups
 }
 
+/// Apple Photos only exists on macOS; elsewhere an import fails loudly so a Photos
+/// rule can never silently strand files (the caller surfaces the error).
+#[cfg(not(target_os = "macos"))]
+fn run_osascript(_script: &str) -> Result<()> {
+    Err(Error::PhotosUnsupported)
+}
+
+#[cfg(target_os = "macos")]
 fn run_osascript(script: &str) -> Result<()> {
     let out = Command::new("osascript").arg("-e").arg(script).output()?;
     if !out.status.success() {
