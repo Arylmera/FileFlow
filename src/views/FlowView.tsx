@@ -1,15 +1,18 @@
-// The Flow map: one lane per automation (source → action → destination), with
-// health and cumulative counts from the run history, plus the raw history list.
+// The Flow map: a node-link graph of every automation — sources and
+// destinations deduplicate into nodes, each rule is an edge (see FlowGraph).
+// Selecting an edge surfaces its lane row with health, counts and actions.
+// The raw run history list lives behind the History tab.
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import * as api from "../api";
 import type { Config } from "../api";
 import type { NamingReq } from "../components/NamingForm";
+import { FlowGraph } from "../components/FlowGraph";
 import { fmtCount, relTime } from "../lib/util";
 
 type LaneKind = "drive" | "photos" | "folder";
 
-interface Lane {
+export interface Lane {
   key: string; // matches the Rust rule_key, joins a rule to its runs
   kind: LaneKind;
   label: string;
@@ -184,6 +187,9 @@ export function FlowView({
 function FlowMap({ lanes, onRun }: { lanes: Lane[]; onRun: (l: Lane) => void }) {
   const filesRouted = lanes.reduce((n, l) => n + l.routed, 0);
   const attention = lanes.filter((l) => l.run?.status === "failed").length;
+  const [selected, setSelected] = useState<string | null>(null);
+  // A rule edited or removed while selected must not strand a stale panel.
+  const selLane = lanes.find((l) => l.key === selected) ?? null;
 
   return (
     <>
@@ -201,11 +207,14 @@ function FlowMap({ lanes, onRun }: { lanes: Lane[]; onRun: (l: Lane) => void }) 
           <span className="l">Needs attention</span>
         </div>
       </div>
-      <div className="lanes">
-        {lanes.map((l) => (
-          <LaneRow key={l.key} lane={l} onRun={onRun} />
-        ))}
-      </div>
+      <FlowGraph lanes={lanes} selectedKey={selected} onSelect={setSelected} />
+      {selLane ? (
+        <div className="lanes">
+          <LaneRow lane={selLane} onRun={onRun} />
+        </div>
+      ) : (
+        <p className="fg-hint">Select a flow to inspect it and run it.</p>
+      )}
     </>
   );
 }

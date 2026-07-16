@@ -791,6 +791,90 @@ details.card-edit[open] > .card-head::before {
   font-size: 11.5px;
 }
 
+/* --- Flow graph (Flow → Map) -------------------------------------------- */
+
+.flow-graph svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.fg-node rect {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.fg-node .t1 {
+  fill: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fg-node .t2 {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.fg-edge {
+  cursor: pointer;
+  outline: none;
+}
+
+.fg-line {
+  fill: none;
+  stroke-width: 2;
+  opacity: 0.75;
+  transition: stroke-width var(--t), opacity var(--t);
+}
+
+.fg-edge:hover .fg-line,
+.fg-edge:focus-visible .fg-line,
+.fg-edge.sel .fg-line {
+  stroke-width: 3.5;
+  opacity: 1;
+}
+
+/* invisible wide stroke so thin curves stay easy to click */
+.fg-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16;
+}
+
+.fg-action {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+/* the d-* palette exists for HTML dots (background); SVG needs fill */
+.fg-status.d-ok {
+  fill: var(--ok);
+}
+
+.fg-status.d-partial,
+.fg-status.d-failed {
+  fill: var(--warn);
+}
+
+.fg-status.d-idle {
+  fill: var(--muted);
+  opacity: 0.5;
+}
+
+.fg-hint {
+  color: var(--muted);
+  font-size: 12.5px;
+  text-align: center;
+  margin-top: var(--s3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fg-dot {
+    display: none;
+  }
+}
+
 .run-counts {
   font-variant-numeric: tabular-nums;
 }
