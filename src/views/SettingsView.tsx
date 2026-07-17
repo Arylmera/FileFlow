@@ -70,6 +70,20 @@ export function SettingsView({
         </label>
         <p className="help check-help">When off, closing the window quits FileFlow.</p>
 
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={config.app.start_minimized}
+            onChange={(e) =>
+              patch({ app: { ...config.app, start_minimized: e.target.checked } })
+            }
+          />
+          Start minimized
+        </label>
+        <p className="help check-help">
+          Open in the {trayName} without showing the window at launch.
+        </p>
+
         {/* The Dock (and hiding the tray icon in its favour) is macOS-only; elsewhere
             the tray icon is the app's one surface and always stays on. */}
         {isMac && (

@@ -116,6 +116,12 @@ pub fn run() {
             // Apply the Dock/menu-bar visibility now that the tray exists.
             apply_window_mode(app.handle(), &config.app);
 
+            // The window is created hidden (tauri.conf.json) so a minimized
+            // start never flashes; show it here unless the setting says not to.
+            if !config.app.start_minimized {
+                show_main(app.handle());
+            }
+
             // File logging to the app log dir (single non-rotating file).
             if let Ok(log_dir) = app.path().app_log_dir() {
                 let _ = std::fs::create_dir_all(&log_dir);

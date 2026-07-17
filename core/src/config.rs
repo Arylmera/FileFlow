@@ -194,6 +194,9 @@ pub struct AppSettings {
     /// Hide to the menu bar on window close instead of quitting.
     #[serde(default = "default_true")]
     pub keep_running_on_close: bool,
+    /// Launch without showing the main window (stay in the tray/menu bar).
+    #[serde(default)]
+    pub start_minimized: bool,
     /// Show the app's icon in the macOS Dock.
     #[serde(default)]
     pub show_dock_icon: bool,
@@ -219,6 +222,7 @@ impl Default for AppSettings {
         AppSettings {
             autostart: true,
             keep_running_on_close: true,
+            start_minimized: false,
             show_dock_icon: false,
             show_tray_icon: true,
             log_level: default_log_level(),

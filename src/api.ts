@@ -37,6 +37,7 @@ export interface CardRule {
 export interface AppSettings {
   autostart: boolean;
   keep_running_on_close: boolean;
+  start_minimized: boolean;
   show_dock_icon: boolean;
   show_tray_icon: boolean;
   log_level: string;
@@ -136,7 +137,7 @@ const inTauri =
 export const emptyConfig: Config = {
   card: [],
   folder: [],
-  app: { autostart: true, keep_running_on_close: true, show_dock_icon: false, show_tray_icon: true, log_level: "info" },
+  app: { autostart: true, keep_running_on_close: true, start_minimized: false, show_dock_icon: false, show_tray_icon: true, log_level: "info" },
 };
 
 // Shared defaults for the per-kind fields a rule doesn't use.

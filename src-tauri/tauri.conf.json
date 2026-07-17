@@ -16,7 +16,7 @@
         "title": "FileFlow",
         "width": 900,
         "height": 640,
-        "visible": true
+        "visible": false
       }
     ],
     "security": {
