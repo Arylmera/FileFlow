@@ -187,3 +187,18 @@ fn eject_is_unsupported_where_theres_no_backend() {
     assert!(!eject(std::path::Path::new("/tmp"), EjectPolicy::Never).unwrap());
     assert!(eject(std::path::Path::new("/tmp"), EjectPolicy::Always).is_err());
 }
+
+// --- GetLogicalDrives bitmask ------------------------------------------------
+
+#[test]
+fn drives_from_bitmask_maps_bits_to_letters() {
+    use fileflow_core::windows::drives_from_bitmask;
+    assert_eq!(drives_from_bitmask(0), Vec::<char>::new());
+    assert_eq!(drives_from_bitmask(0b1), vec!['A']);
+    // C: and E: — bits 2 and 4, the shape a machine with one card inserted reports.
+    assert_eq!(drives_from_bitmask(0b1_0100), vec!['C', 'E']);
+    assert_eq!(drives_from_bitmask(1 << 25), vec!['Z']);
+    // Bits above Z are not letters and must not produce garbage chars.
+    assert_eq!(drives_from_bitmask(1 << 26), Vec::<char>::new());
+    assert_eq!(drives_from_bitmask(u32::MAX).len(), 26);
+}

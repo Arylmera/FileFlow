@@ -51,6 +51,12 @@ struct RawVolume {
     drive_type: Option<u32>,
 }
 
+/// Drive letters set in a `GetLogicalDrives` bitmask (bit 0 = `A:`, bit 25 = `Z:`).
+/// Pure so the bit twiddling is testable off-Windows; the caller does the syscall.
+pub fn drives_from_bitmask(mask: u32) -> Vec<char> {
+    (0..26u32).filter(|i| mask & (1 << i) != 0).map(|i| (b'A' + i as u8) as char).collect()
+}
+
 /// The PowerShell command whose output [`parse_win32_volumes`] understands.
 pub const LIST_VOLUMES_COMMAND: &str = "Get-CimInstance -ClassName Win32_Volume | Select-Object DriveLetter, DeviceID, Label, DriveType | ConvertTo-Json -Compress";
 

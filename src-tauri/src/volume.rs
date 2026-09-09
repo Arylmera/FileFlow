@@ -68,12 +68,19 @@ mod imp {
     use std::os::windows::process::CommandExt;
     use std::path::{Path, PathBuf};
     use std::process::Command;
+    use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
+
+    /// `GetDriveTypeW` returns: 2 = removable (SD/USB), 3 = fixed. Declared here because
+    /// windows-sys 0.59 doesn't re-export them; the values are Win32 ABI, frozen forever.
+    const DRIVE_REMOVABLE: u32 = 2;
+    const DRIVE_FIXED: u32 = 3;
 
     /// Don't flash a console window when a GUI app spawns PowerShell.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-    /// All lettered volumes from `Win32_Volume` (letter-less recovery/EFI partitions
-    /// are dropped — they can't hold a card's files). The parsing itself is pure and
+    /// All lettered volumes from `Win32_Volume`, with their GUIDs. Only the UUID
+    /// lookups below use this — they run once per volume arrival, not on the poll — so
+    /// the PowerShell spawn stays off the hot path. The parsing itself is pure and
     /// unit-tested in `fileflow-core`.
     fn list_volumes() -> Vec<WinVolume> {
         let out = Command::new("powershell")
@@ -87,9 +94,26 @@ mod imp {
         parse_win32_volumes(&String::from_utf8_lossy(&out.stdout)).unwrap_or_default()
     }
 
-    /// Mount roots (`E:\`) of every lettered volume — the Windows analogue of `/Volumes`.
+    /// Mount roots (`E:\`) of every local lettered volume — the Windows analogue of
+    /// `/Volumes`. This is the *polled* path (every 5s while the app runs), so it uses
+    /// `GetLogicalDrives` + `GetDriveTypeW` — two syscalls — instead of shelling out to
+    /// PowerShell, which cost a process + conhost per poll (~17k/day) and made the app a
+    /// reliable way to catch a window-station teardown mid-spawn (STATUS_DLL_INIT_FAILED
+    /// popups at logoff). Kind filtering keeps parity with `Win32_Volume`, which lists
+    /// local volumes only — a mapped network drive must not read as a card arrival.
     pub fn mounted_volumes() -> HashSet<PathBuf> {
-        list_volumes().iter().filter_map(WinVolume::mount_root).collect()
+        // SAFETY: no arguments, no pointers; returns a plain bitmask.
+        let mask = unsafe { GetLogicalDrives() };
+        fileflow_core::windows::drives_from_bitmask(mask)
+            .into_iter()
+            .filter(|&letter| {
+                let root: Vec<u16> = format!("{letter}:\\").encode_utf16().chain([0]).collect();
+                // SAFETY: `root` is a nul-terminated UTF-16 buffer alive for the call.
+                let kind = unsafe { GetDriveTypeW(root.as_ptr()) };
+                kind == DRIVE_REMOVABLE || kind == DRIVE_FIXED
+            })
+            .map(|letter| PathBuf::from(format!("{letter}:\\")))
+            .collect()
     }
 
     /// True for the Windows system drive (`%SystemDrive%`, normally `C:`). Never eject it.
