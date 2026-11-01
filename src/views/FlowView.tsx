@@ -108,10 +108,12 @@ function buildLanes(config: Config, runs: api.RunRecord[]): Lane[] {
 
 export function FlowView({
   config,
+  dirty,
   onNeedNames,
   onNavigate,
 }: {
   config: Config;
+  dirty: boolean; // unsaved edits: lane indices may not match the saved rules the backend runs
   onNeedNames: (r: NamingReq) => void;
   onNavigate: (t: "cards" | "folders") => void;
 }) {
@@ -129,6 +131,10 @@ export function FlowView({
   const empty = config.card.length === 0 && config.folder.length === 0;
 
   async function runLane(l: Lane) {
+    if (dirty) {
+      alert("Save your changes first.");
+      return;
+    }
     try {
       if (l.kind === "drive" && l.cardUuid) {
         if (l.promptName) {

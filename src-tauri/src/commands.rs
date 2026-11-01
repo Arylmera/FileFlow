@@ -2,7 +2,7 @@
 
 use crate::state::{ActivityEntry, AppState, RunRecord};
 use crate::{volume, watchers};
-use fileflow_core::config::{Config, EjectPolicy};
+use fileflow_core::config::{AfterImport, CardRule, Config, Destination, EjectPolicy};
 use fileflow_core::ingest::{self, DateGroup};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -23,15 +23,17 @@ pub fn get_config(state: State<AppState>) -> Config {
     state.snapshot()
 }
 
-/// Reject a save whose include/exclude regex won't compile, so a bad pattern can't
-/// silently turn every flow into a deny-all (the scanners' fail-closed fallback).
-fn validate_filters(config: &Config) -> Result<(), String> {
+/// Reject a config the flows can't run safely:
+/// - an include/exclude regex that won't compile would silently turn the flow into a
+///   deny-all (the scanners' fail-closed fallback);
+/// - a Photos rule set to archive with no archive folder would move the exports into
+///   the process's working directory.
+fn validate(config: &Config) -> Result<(), String> {
     use fileflow_core::util::validate_regex;
+    let name = |label: &str| if label.is_empty() { "(unnamed)".to_string() } else { label.to_string() };
     let check = |pat: &str, which: &str, what: &str, label: &str| {
-        validate_regex(pat).map_err(|e| {
-            let name = if label.is_empty() { "(unnamed)" } else { label };
-            format!("{what} “{name}”: {which} pattern is invalid — {e}")
-        })
+        validate_regex(pat)
+            .map_err(|e| format!("{what} “{}”: {which} pattern is invalid — {e}", name(label)))
     };
     for c in &config.cards {
         check(&c.include, "include", "Drive", &c.label)?;
@@ -40,13 +42,26 @@ fn validate_filters(config: &Config) -> Result<(), String> {
     for f in &config.folders {
         check(&f.include, "include", "Folder", &f.label)?;
         check(&f.exclude, "exclude", "Folder", &f.label)?;
+        if let Destination::Photos { after_import: AfterImport::Archive, archive_folder, .. } = &f.target {
+            if archive_folder.trim().is_empty() {
+                return Err(format!("Folder “{}”: choose an archive folder, or pick another after-import action", name(&f.label)));
+            }
+        }
     }
     Ok(())
 }
 
+/// The drive rule for `uuid`, its mounted volume, and its pre-flighted destination.
+fn resolve_card(state: &AppState, uuid: &str) -> Result<(CardRule, PathBuf, PathBuf), String> {
+    let rule = state.snapshot().card(uuid).cloned().ok_or("no drive rule matches that UUID")?;
+    let volume_root = volume::find_volume_by_uuid(uuid).ok_or("drive not connected")?;
+    let dest = ingest::resolve_dest(&rule, &volume_root).map_err(|e| e.to_string())?;
+    Ok((rule, volume_root, dest))
+}
+
 #[tauri::command]
 pub fn save_config(app: AppHandle, state: State<AppState>, mut config: Config) -> Result<(), String> {
-    validate_filters(&config)?;
+    validate(&config)?;
     config.app.ensure_reachable();
     config.save(&state.config_path).map_err(|e| e.to_string())?;
     crate::apply_window_mode(&app, &config.app);
@@ -62,9 +77,7 @@ pub fn list_mounted_cards(state: State<AppState>) -> Vec<MountedCard> {
         .into_iter()
         .map(|path| {
             let uuid = volume::volume_uuid(&path);
-            let rule = uuid
-                .as_ref()
-                .and_then(|u| cfg.cards.iter().find(|c| c.uuid.eq_ignore_ascii_case(u)));
+            let rule = uuid.as_deref().and_then(|u| cfg.card(u));
             MountedCard {
                 label: path
                     .file_name()
@@ -87,15 +100,7 @@ pub fn list_mounted_cards(state: State<AppState>) -> Vec<MountedCard> {
 /// so the UI can show the naming form.
 #[tauri::command]
 pub fn prepare_ingest(state: State<AppState>, uuid: String) -> Result<Vec<DateGroup>, String> {
-    let cfg = state.snapshot();
-    let rule = cfg
-        .cards
-        .iter()
-        .find(|c| c.uuid.eq_ignore_ascii_case(&uuid))
-        .cloned()
-        .ok_or("no drive rule matches that UUID")?;
-    let volume_root = volume::find_volume_by_uuid(&uuid).ok_or("drive not connected")?;
-    ingest::resolve_dest(&rule, &volume_root).map_err(|e| e.to_string())?;
+    let (rule, volume_root, _) = resolve_card(&state, &uuid)?;
     Ok(ingest::scan_dates(&rule, &volume_root))
 }
 
@@ -107,19 +112,17 @@ pub fn run_ingest_now(
     uuid: String,
     names: BTreeMap<String, String>,
 ) -> Result<(), String> {
-    let cfg = app.state::<AppState>().snapshot();
-    let rule = cfg
-        .cards
-        .iter()
-        .find(|c| c.uuid.eq_ignore_ascii_case(&uuid))
-        .cloned()
-        .ok_or("no drive rule matches that UUID")?;
-    let volume_root = volume::find_volume_by_uuid(&uuid).ok_or("drive not connected")?;
-    let dest = ingest::resolve_dest(&rule, &volume_root).map_err(|e| e.to_string())?;
+    let (rule, volume_root, dest) = resolve_card(&app.state::<AppState>(), &uuid)?;
     std::thread::spawn(move || {
         watchers::run_card_ingest(&app, &rule, &volume_root, &names, &dest);
     });
     Ok(())
+}
+
+/// The user's answer to a `drive-pending` confirmation: erase and/or eject the drive.
+#[tauri::command]
+pub fn finish_drive(app: AppHandle, uuid: String, erase: bool, eject: bool) -> Result<(), String> {
+    watchers::finish_drive(&app, &uuid, erase, eject)
 }
 
 /// Manually eject a mounted volume by its mount path. Independent of any rule.
@@ -214,3 +217,23 @@ pub fn log_path(app: AppHandle) -> Result<String, String> {
     Ok(dir.join("fileflow.log").to_string_lossy().to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::validate;
+    use fileflow_core::config::Config;
+    use serde_json::json;
+
+    fn cfg(folder: serde_json::Value) -> Config {
+        serde_json::from_value(json!({ "folder": [folder] })).unwrap()
+    }
+
+    #[test]
+    fn validate_rejects_archive_without_folder_and_bad_regex() {
+        let photos = |archive: &str| {
+            cfg(json!({ "watch": "~/in", "kind": "photos", "after_import": "archive", "archive_folder": archive }))
+        };
+        assert!(validate(&photos("")).is_err(), "archive with no folder is rejected");
+        assert!(validate(&photos("~/done")).is_ok());
+        assert!(validate(&cfg(json!({ "watch": "~/in", "kind": "folder", "include": "(" }))).is_err());
+    }
+}

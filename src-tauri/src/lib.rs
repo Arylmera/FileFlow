@@ -170,6 +170,7 @@ pub fn run() {
             commands::prepare_ingest,
             commands::run_ingest_now,
             commands::eject_now,
+            commands::finish_drive,
             commands::run_photos_import_now,
             commands::run_folder_now,
             commands::get_activity,

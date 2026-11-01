@@ -122,6 +122,15 @@ export interface PhotosReady {
   dates: DateGroup[];
 }
 
+/** A drive imported cleanly and its rule says "Ask first" to erase and/or eject. */
+export interface DrivePending {
+  uuid: string;
+  label: string;
+  files: number; // what an erase would remove
+  ask_erase: boolean;
+  ask_eject: boolean;
+}
+
 export interface Progress {
   flow: string;
   label: string;
@@ -214,6 +223,8 @@ export const prepareIngest = (uuid: string) => invoke<DateGroup[]>("prepare_inge
 export const runIngestNow = (uuid: string, names: Record<string, string>) =>
   invoke<void>("run_ingest_now", { uuid, names });
 export const ejectNow = (path: string) => invoke<void>("eject_now", { path });
+export const finishDrive = (uuid: string, erase: boolean, eject: boolean) =>
+  invoke<void>("finish_drive", { uuid, erase, eject });
 export const runFolderNow = (index: number) => invoke<void>("run_folder_now", { index });
 export const runPhotosImportNow = (index: number, names: Record<string, string>) =>
   invoke<void>("run_photos_import_now", { index, names });

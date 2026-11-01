@@ -247,6 +247,11 @@ fn default_log_level() -> String {
 }
 
 impl Config {
+    /// The drive rule for a volume UUID (case-insensitive — diskutil and users disagree).
+    pub fn card(&self, uuid: &str) -> Option<&CardRule> {
+        self.cards.iter().find(|c| c.uuid.eq_ignore_ascii_case(uuid))
+    }
+
     /// Load config from `path`; a missing file yields the default config (not an error).
     pub fn load(path: &Path) -> Result<Config> {
         match std::fs::read_to_string(path) {

@@ -10,10 +10,12 @@ export function FoldersView({
   config,
   patch,
   isMac,
+  dirty,
 }: {
   config: Config;
   patch: (p: Partial<Config>) => void;
   isMac: boolean;
+  dirty: boolean; // unsaved edits: indices may not match the saved rules the backend runs
 }) {
   const update = (i: number, p: Partial<FolderRule>) =>
     patch({ folder: config.folder.map((r, j) => (j === i ? { ...r, ...p } : r)) });
@@ -69,7 +71,11 @@ export function FoldersView({
               )}
             </div>
             <div className="row">
-              <button onClick={(e) => { e.preventDefault(); api.runFolderNow(i); }}>
+              <button
+                disabled={dirty}
+                title={dirty ? "Save your changes first" : undefined}
+                onClick={(e) => { e.preventDefault(); api.runFolderNow(i); }}
+              >
                 {rule.kind === "photos" ? "Import now" : "Move now"}
               </button>
               <button className="danger" onClick={(e) => { e.preventDefault(); remove(i); }}>

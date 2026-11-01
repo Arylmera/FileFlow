@@ -1,9 +1,10 @@
 //! Shared app state: the live config, where it persists, recent activity, and the
 //! durable run history that powers the Flow map.
 
-use fileflow_core::config::Config;
+use fileflow_core::config::{CardRule, Config};
+use fileflow_core::ingest::IngestReport;
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,7 +15,7 @@ const RUN_CAP: usize = 500;
 
 #[derive(Clone, Serialize)]
 pub struct ActivityEntry {
-    pub flow: String,    // "card" | "photos"
+    pub flow: String,    // "drive" | "folder" | "photos"
     pub message: String,
     pub ts: String,      // local HH:MM:SS
 }
@@ -36,8 +37,20 @@ pub struct RunRecord {
     pub detail: String,
 }
 
+/// A drive that imported cleanly and is waiting for the user to answer an "Ask first"
+/// erase/eject policy. Held in memory only: if the app quits first, the drive is simply
+/// left intact — the safe outcome.
+pub struct PendingDrive {
+    pub rule: CardRule,
+    pub volume_root: PathBuf,
+    /// The verified import; its sources are exactly what an erase may delete.
+    pub report: IngestReport,
+}
+
 pub struct AppState {
     pub config: Mutex<Config>,
+    /// Pending drive confirmations, keyed by lowercased volume UUID.
+    pub pending: Mutex<HashMap<String, PendingDrive>>,
     pub config_path: PathBuf,
     pub activity: Mutex<VecDeque<ActivityEntry>>,
     pub runs: Mutex<VecDeque<RunRecord>>,
@@ -56,6 +69,7 @@ impl AppState {
         let runs = load_runs(&runs_path);
         AppState {
             config: Mutex::new(config),
+            pending: Mutex::new(HashMap::new()),
             config_path,
             activity: Mutex::new(VecDeque::new()),
             runs: Mutex::new(runs),

@@ -3,7 +3,7 @@
 //! Each flow runs on a single dedicated worker thread fed by an mpsc channel, which
 //! gives re-entrancy safety for free: one event can't start an overlapping run.
 
-use crate::state::{ActivityEntry, AppState, RunRecord};
+use crate::state::{ActivityEntry, AppState, PendingDrive, RunRecord};
 use crate::volume;
 use fileflow_core::config::{AlbumMode, CardRule, CleanupPolicy, Destination, EjectPolicy, FolderRule};
 use fileflow_core::folder;
@@ -197,58 +197,22 @@ pub fn run_now(app: &AppHandle, index: usize) {
 
 /// Move the watched folder's contents into its dated destination.
 fn run_folder_move(app: &AppHandle, rule: &FolderRule) {
-    let Destination::Folder { dest, .. } = &rule.target else {
-        return;
-    };
-    let label = if rule.label.is_empty() {
-        "Folder".to_string()
-    } else {
-        rule.label.clone()
-    };
-    match folder::run_folder_move(rule, |done, total| emit_progress(app, "folder", &label, done, total)) {
+    let run = RunTarget::folder(rule);
+    match folder::run_folder_move(rule, |done, total| emit_progress(app, "folder", &run.label, done, total)) {
         Ok(report) => {
-            if report.moved.is_empty() && report.failed.is_empty() {
+            let (moved, failed) = (report.moved.len(), report.failed.len());
+            if moved == 0 && failed == 0 {
                 return;
             }
-            let msg = format!(
-                "{}: moved {} file(s), {} failed → {}",
-                label,
-                report.moved.len(),
-                report.failed.len(),
-                dest
-            );
+            let msg = format!("{}: moved {moved} file(s), {failed} failed → {}", run.label, run.dest);
             notify(app, "FileFlow — Folder move", &msg);
             emit_activity(app, "folder", &msg);
-            record_run(
-                app,
-                "folder",
-                format!("folder:{}", rule.watch),
-                &label,
-                rule.watch.clone(),
-                dest.clone(),
-                report.moved.len(),
-                0,
-                report.failed.len(),
-                run_status(report.moved.len(), report.failed.len()),
-                msg,
-            );
+            run.finished(app, moved, 0, failed, msg);
         }
         Err(e) => {
             notify(app, "FileFlow — destination unavailable", &e.to_string());
-            emit_activity(app, "folder", &format!("{label}: {e}"));
-            record_run(
-                app,
-                "folder",
-                format!("folder:{}", rule.watch),
-                &label,
-                rule.watch.clone(),
-                dest.clone(),
-                0,
-                0,
-                0,
-                "failed",
-                e.to_string(),
-            );
+            emit_activity(app, "folder", &format!("{}: {e}", run.label));
+            run.failed(app, 0, e.to_string());
         }
     }
 }
@@ -260,13 +224,7 @@ fn handle_volume(app: &AppHandle, volume_root: &Path) {
     let Some(uuid) = volume::volume_uuid(volume_root) else {
         return;
     };
-    let cfg = app.state::<AppState>().snapshot();
-    let Some(rule) = cfg
-        .cards
-        .iter()
-        .find(|c| c.uuid.eq_ignore_ascii_case(&uuid))
-        .cloned()
-    else {
+    let Some(rule) = app.state::<AppState>().snapshot().card(&uuid).cloned() else {
         return; // unknown volume — ignore silently
     };
 
@@ -276,6 +234,7 @@ fn handle_volume(app: &AppHandle, volume_root: &Path) {
         Err(e) => {
             notify(app, "FileFlow — destination unavailable", &e.to_string());
             emit_activity(app, "drive", &format!("{}: {e}", rule.label));
+            RunTarget::card(&rule).failed(app, 0, e.to_string());
             return;
         }
     };
@@ -305,7 +264,7 @@ fn handle_volume(app: &AppHandle, volume_root: &Path) {
     }
 
     if rule.prompt_name {
-        // The naming form is the UI's job (Phase 5): hand it the dates and surface us.
+        // Naming is the UI's job: hand it the dates and bring the window forward.
         let _ = app.emit(
             "card-ready",
             CardReady {
@@ -322,8 +281,8 @@ fn handle_volume(app: &AppHandle, volume_root: &Path) {
     run_card_ingest(app, &rule, volume_root, &BTreeMap::new(), &dest);
 }
 
-/// Copy + verify, then cleanup/eject per policy. Public so the Phase 4 command can
-/// call it once the UI has collected per-date names.
+/// Copy + verify, then cleanup/eject per policy. Public so `run_ingest_now` can call it
+/// once the UI has collected per-date names.
 pub fn run_card_ingest(
     app: &AppHandle,
     rule: &CardRule,
@@ -339,55 +298,126 @@ pub fn run_card_ingest(
     let summary = format!("{c} copied, {s} skipped, {f} failed → {}", rule.dest);
     notify(app, &format!("FileFlow — {}", rule.label), &summary);
     emit_activity(app, "drive", &summary);
-    record_run(
-        app,
-        "drive",
-        format!("card:{}", rule.uuid),
-        &rule.label,
-        rule.sources.join(", "),
-        rule.dest.clone(),
-        c,
-        s,
-        f,
-        run_status(c + s, f),
-        summary.clone(),
-    );
+    RunTarget::card(rule).finished(app, c, s, f, summary.clone());
 
     if !report.is_clean() {
         // All-or-nothing: any failure aborts both cleanup and eject. Card untouched.
         return;
     }
 
-    match rule.cleanup {
-        CleanupPolicy::Always => match ingest::cleanup(&report) {
-            Ok(c) => {
-                emit_activity(app, "drive", &format!("deleted {} file(s) from drive", c.deleted.len()));
-                if !c.failed.is_empty() {
-                    emit_activity(app, "drive", &format!("{} file(s) could not be removed from drive", c.failed.len()));
-                }
-            }
-            Err(e) => emit_activity(app, "drive", &format!("cleanup error: {e}")),
-        },
-        CleanupPolicy::Never => {}
-        CleanupPolicy::Ask => {
-            // Confirmation dialog is Phase 5; until then keep the card intact and stop
-            // before ejecting (the user may still want the card mounted).
-            let _ = app.emit("cleanup-pending", &summary);
-            emit_activity(app, "drive", "cleanup needs confirmation (drive kept intact)");
-            return;
-        }
+    if rule.cleanup == CleanupPolicy::Always {
+        erase_drive(app, &report);
     }
 
-    match rule.eject {
-        EjectPolicy::Always => match ingest::eject(volume_root, EjectPolicy::Always) {
-            Ok(_) => emit_activity(app, "drive", "drive ejected"),
-            Err(e) => notify(app, "FileFlow — eject failed", &e.to_string()),
-        },
-        EjectPolicy::Never => {}
-        EjectPolicy::Ask => {
-            let _ = app.emit("eject-pending", ());
-        }
+    let ask_erase = rule.cleanup == CleanupPolicy::Ask;
+    let ask_eject = rule.eject == EjectPolicy::Ask;
+    if ask_erase || ask_eject {
+        // Park the verified import and ask; `finish_drive` acts on the answer.
+        let pending = DrivePending {
+            uuid: rule.uuid.clone(),
+            label: rule.label.clone(),
+            files: report.deletable_sources().count(),
+            ask_erase,
+            ask_eject,
+        };
+        app.state::<AppState>().pending.lock().unwrap().insert(
+            rule.uuid.to_lowercase(),
+            PendingDrive { rule: rule.clone(), volume_root: volume_root.to_path_buf(), report },
+        );
+        let _ = app.emit("drive-pending", pending);
+        crate::show_main(app);
+        return;
     }
+
+    if rule.eject == EjectPolicy::Always {
+        eject_drive(app, volume_root);
+    }
+}
+
+/// Event payload: a drive imported cleanly and its rule says "ask first" to erase and/or eject.
+#[derive(Clone, Serialize)]
+struct DrivePending {
+    uuid: String,
+    label: String,
+    files: usize, // sources an erase would remove (copied + already present)
+    ask_erase: bool,
+    ask_eject: bool,
+}
+
+/// Apply the user's answer to a pending drive. Validates synchronously (so the UI can
+/// report a problem), then erases/ejects on a worker thread.
+///
+/// Answers only count for the questions the rule asked: `erase` is ignored unless the
+/// rule's cleanup is "ask", and an "always" eject still happens whatever `eject` says.
+/// Before touching the volume we re-check its UUID, so a different drive remounted at
+/// the same path can never be erased with another card's file list.
+pub fn finish_drive(app: &AppHandle, uuid: &str, erase: bool, eject: bool) -> Result<(), String> {
+    let p = app
+        .state::<AppState>()
+        .pending
+        .lock()
+        .unwrap()
+        .remove(&uuid.to_lowercase())
+        .ok_or("this drive has no pending import")?;
+    let (erase, eject) = effective_answers(&p.rule, erase, eject);
+    if !erase && !eject {
+        emit_activity(app, "drive", &format!("{}: files kept on the drive", p.rule.label));
+        return Ok(());
+    }
+    let same_drive = volume::volume_uuid(&p.volume_root).is_some_and(|u| u.eq_ignore_ascii_case(uuid));
+    if !same_drive {
+        return Err("The drive is no longer connected, so nothing was erased or ejected.".into());
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if erase {
+            erase_drive(&app, &p.report);
+        }
+        if eject {
+            eject_drive(&app, &p.volume_root);
+        }
+    });
+    Ok(())
+}
+
+/// What to actually do with a pending drive: the user's answer only counts where the rule
+/// asked. Erase needs cleanup = "ask" (an "always" erase already ran; "never" never does);
+/// eject follows the policy unless it is "ask".
+fn effective_answers(rule: &CardRule, erase: bool, eject: bool) -> (bool, bool) {
+    let erase = erase && rule.cleanup == CleanupPolicy::Ask;
+    let eject = match rule.eject {
+        EjectPolicy::Always => true,
+        EjectPolicy::Ask => eject,
+        EjectPolicy::Never => false,
+    };
+    (erase, eject)
+}
+
+/// Delete an import's verified sources from the drive (`ingest::cleanup` re-checks the
+/// all-or-nothing gate itself) and log the outcome.
+fn erase_drive(app: &AppHandle, report: &ingest::IngestReport) {
+    match ingest::cleanup(report) {
+        Ok(c) => {
+            emit_activity(app, "drive", &format!("erased {} file(s) from the drive", c.deleted.len()));
+            if !c.failed.is_empty() {
+                emit_activity(app, "drive", &format!("{} file(s) could not be erased from the drive", c.failed.len()));
+            }
+        }
+        Err(e) => emit_activity(app, "drive", &format!("erase skipped: {e}")),
+    }
+}
+
+fn eject_drive(app: &AppHandle, volume_root: &Path) {
+    match ingest::eject(volume_root, EjectPolicy::Always) {
+        Ok(_) => emit_activity(app, "drive", "drive ejected"),
+        Err(e) => notify(app, "FileFlow — eject failed", &e.to_string()),
+    }
+}
+
+/// Scan a Photos rule's watch folder through its filters.
+fn photos_files(rule: &FolderRule) -> Vec<PathBuf> {
+    let filter = NameFilter::compile_or_deny(&rule.include, &rule.exclude);
+    photos::scan_folder(&ingest::expand(&rule.watch), &rule.extensions, &filter)
 }
 
 /// Photos-flow entry point: prompt for names if configured, otherwise import now.
@@ -395,14 +425,13 @@ fn run_photos_flow(app: &AppHandle, index: usize, rule: &FolderRule) {
     let Destination::Photos { album_mode, prompt_name, .. } = &rule.target else {
         return;
     };
-    let filter = NameFilter::compile_or_deny(&rule.include, &rule.exclude);
-    let files = photos::scan_folder(&ingest::expand(&rule.watch), &rule.extensions, &filter);
+    let files = photos_files(rule);
     if files.is_empty() {
         return;
     }
     // By-date album with a name prompt → hand the dates to the UI naming form.
     if *album_mode == AlbumMode::Template && *prompt_name {
-        let dates = photos::date_groups(&files);
+        let dates = ingest::date_groups(&files);
         if dates.is_empty() {
             return;
         }
@@ -418,8 +447,7 @@ pub fn run_photos_import_named(app: &AppHandle, index: usize, names: &BTreeMap<S
     let Some(rule) = app.state::<AppState>().snapshot().folders.get(index).cloned() else {
         return;
     };
-    let filter = NameFilter::compile_or_deny(&rule.include, &rule.exclude);
-    let files = photos::scan_folder(&ingest::expand(&rule.watch), &rule.extensions, &filter);
+    let files = photos_files(&rule);
     if !files.is_empty() {
         do_photos_import(app, &rule, &files, names);
     }
@@ -450,24 +478,13 @@ fn do_photos_import(
             names: names.clone(),
         },
     };
+    let run = RunTarget::folder(rule);
     match photos::import_to_photos(files, &target, *skip_duplicates) {
         Ok(rep) => {
             let msg = format!("imported {} file(s) → {}", rep.imported, rep.album);
             notify(app, "FileFlow — Photos", &msg);
             emit_activity(app, "photos", &msg);
-            record_run(
-                app,
-                "photos",
-                format!("folder:{}", rule.watch),
-                &rule.label,
-                rule.watch.clone(),
-                "Apple Photos".to_string(),
-                rep.imported,
-                0,
-                0,
-                run_status(rep.imported, 0),
-                msg,
-            );
+            run.finished(app, rep.imported, 0, 0, msg);
             let archive = ingest::expand(archive_folder);
             if let Err(e) = photos::after_import(files, *after_import, &archive) {
                 emit_activity(app, "photos", &format!("after-import error: {e}"));
@@ -480,36 +497,12 @@ fn do_photos_import(
                 "Grant access in System Settings ▸ Privacy & Security ▸ Automation.",
             );
             emit_activity(app, "photos", "not authorized (Automation)");
-            record_run(
-                app,
-                "photos",
-                format!("folder:{}", rule.watch),
-                &rule.label,
-                rule.watch.clone(),
-                "Apple Photos".to_string(),
-                0,
-                0,
-                files.len(),
-                "failed",
-                "Photos not authorized (Automation)".to_string(),
-            );
+            run.failed(app, files.len(), "Photos not authorized (Automation)".into());
         }
         Err(e) => {
             notify(app, "FileFlow — Photos import failed", &e.to_string());
             emit_activity(app, "photos", &format!("error: {e}"));
-            record_run(
-                app,
-                "photos",
-                format!("folder:{}", rule.watch),
-                &rule.label,
-                rule.watch.clone(),
-                "Apple Photos".to_string(),
-                0,
-                0,
-                files.len(),
-                "failed",
-                e.to_string(),
-            );
+            run.failed(app, files.len(), e.to_string());
         }
     }
 }
@@ -532,54 +525,75 @@ fn notify(app: &AppHandle, title: &str, body: &str) {
     let _ = app.notification().builder().title(title).body(body).show();
 }
 
-/// `ok` when nothing failed, `failed` when nothing got through, else `partial`.
-fn run_status(progressed: usize, failed: usize) -> &'static str {
-    if failed > 0 && progressed == 0 {
-        "failed"
-    } else if failed > 0 {
-        "partial"
-    } else {
-        "ok"
-    }
-}
-
-/// Persist a completed run and emit a `run` event so an open Flow map refreshes live.
-#[allow(clippy::too_many_arguments)]
-fn record_run(
-    app: &AppHandle,
-    flow: &str,
-    rule_key: String,
-    label: &str,
+/// The rule a run belongs to — the fields every [`RunRecord`] for one rule shares.
+struct RunTarget {
+    flow: &'static str,
+    rule_key: String, // joins a run back to its rule in the Flow map
+    label: String,
     source: String,
     dest: String,
-    ok: usize,
-    skipped: usize,
-    failed: usize,
-    status: &str,
-    detail: String,
-) {
-    // A re-scan that imported/copied nothing and failed nothing isn't a run worth logging:
-    // recording it resets the lane's "last imported" time to now while the count stays
-    // cumulative, so a no-op re-import reads as "44 files imported · just now". Failures
-    // (failed > 0) still get logged.
-    if ok == 0 && failed == 0 {
-        return;
+}
+
+impl RunTarget {
+    fn card(rule: &CardRule) -> Self {
+        RunTarget {
+            flow: "drive",
+            rule_key: format!("card:{}", rule.uuid),
+            label: rule.label.clone(),
+            source: rule.sources.join(", "),
+            dest: rule.dest.clone(),
+        }
     }
-    let rec = RunRecord {
-        ts: chrono::Local::now().to_rfc3339(),
-        flow: flow.to_string(),
-        rule_key,
-        label: label.to_string(),
-        source,
-        dest,
-        ok,
-        skipped,
-        failed,
-        status: status.to_string(),
-        detail,
-    };
-    app.state::<AppState>().push_run(rec.clone());
-    let _ = app.emit("run", rec);
+
+    fn folder(rule: &FolderRule) -> Self {
+        let (flow, dest) = match &rule.target {
+            Destination::Folder { dest, .. } => ("folder", dest.clone()),
+            Destination::Photos { .. } => ("photos", "Apple Photos".to_string()),
+        };
+        let label = if rule.label.is_empty() { "Folder".to_string() } else { rule.label.clone() };
+        RunTarget { flow, rule_key: format!("folder:{}", rule.watch), label, source: rule.watch.clone(), dest }
+    }
+
+    /// Record a run that went through. Status: `ok` when nothing failed, `failed` when
+    /// nothing got through, else `partial`. A no-op re-scan (nothing done, nothing failed)
+    /// isn't recorded: it would reset the lane's "last run" time while the count stays
+    /// cumulative, so a no-op re-import would read as "44 files imported · just now".
+    fn finished(&self, app: &AppHandle, ok: usize, skipped: usize, failed: usize, detail: String) {
+        if ok == 0 && failed == 0 {
+            return;
+        }
+        let status = match (ok + skipped, failed) {
+            (_, 0) => "ok",
+            (0, _) => "failed",
+            _ => "partial",
+        };
+        self.record(app, ok, skipped, failed, status, detail);
+    }
+
+    /// Record a run that couldn't complete (destination unavailable, Photos refused).
+    /// Always recorded, so the Flow map flags the rule as needing attention.
+    fn failed(&self, app: &AppHandle, failed: usize, detail: String) {
+        self.record(app, 0, 0, failed, "failed", detail);
+    }
+
+    /// Persist the run and emit a `run` event so an open Flow map refreshes live.
+    fn record(&self, app: &AppHandle, ok: usize, skipped: usize, failed: usize, status: &str, detail: String) {
+        let rec = RunRecord {
+            ts: chrono::Local::now().to_rfc3339(),
+            flow: self.flow.to_string(),
+            rule_key: self.rule_key.clone(),
+            label: self.label.clone(),
+            source: self.source.clone(),
+            dest: self.dest.clone(),
+            ok,
+            skipped,
+            failed,
+            status: status.to_string(),
+            detail,
+        };
+        app.state::<AppState>().push_run(rec.clone());
+        let _ = app.emit("run", rec);
+    }
 }
 
 fn emit_activity(app: &AppHandle, flow: &str, message: &str) {
@@ -591,4 +605,35 @@ fn emit_activity(app: &AppHandle, flow: &str, message: &str) {
     };
     app.state::<AppState>().push_activity(entry.clone());
     let _ = app.emit("activity", entry);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::effective_answers;
+    use fileflow_core::config::{CardRule, CleanupPolicy, EjectPolicy};
+
+    fn rule(cleanup: CleanupPolicy, eject: EjectPolicy) -> CardRule {
+        let mut r: CardRule = serde_json::from_value(serde_json::json!({
+            "uuid": "U", "sources": ["DCIM"], "dest": "/tmp"
+        }))
+        .unwrap();
+        r.cleanup = cleanup;
+        r.eject = eject;
+        r
+    }
+
+    #[test]
+    fn answers_only_count_where_the_rule_asked() {
+        use CleanupPolicy as C;
+        use EjectPolicy as E;
+        // Asked both: the answer decides.
+        assert_eq!(effective_answers(&rule(C::Ask, E::Ask), true, false), (true, false));
+        assert_eq!(effective_answers(&rule(C::Ask, E::Ask), false, true), (false, true));
+        // Erase is never honoured unless asked — "never" stays never, "always" already ran.
+        assert_eq!(effective_answers(&rule(C::Never, E::Ask), true, true), (false, true));
+        assert_eq!(effective_answers(&rule(C::Always, E::Ask), true, false), (false, false));
+        // A fixed eject policy wins over the answer.
+        assert_eq!(effective_answers(&rule(C::Ask, E::Always), false, false), (false, true));
+        assert_eq!(effective_answers(&rule(C::Ask, E::Never), true, true), (true, false));
+    }
 }

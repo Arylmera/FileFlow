@@ -175,9 +175,15 @@ fn mtime_of(p: &Path) -> Option<std::time::SystemTime> {
 /// Group matching files by capture date (from mtime), sorted ascending by date.
 /// Runs before prompting so the UI can ask for a name per date.
 pub fn scan_dates(rule: &CardRule, volume_root: &Path) -> Vec<DateGroup> {
+    date_groups(&scan_files(rule, volume_root))
+}
+
+/// Distinct capture dates (from mtime) across a file list, sorted ascending — the
+/// naming form's input for both the drive and the Photos flow.
+pub fn date_groups(files: &[PathBuf]) -> Vec<DateGroup> {
     let mut map: BTreeMap<(String, String), usize> = BTreeMap::new(); // (date, year) -> count
-    for f in scan_files(rule, volume_root) {
-        if let Some(mtime) = mtime_of(&f) {
+    for f in files {
+        if let Some(mtime) = mtime_of(f) {
             let (year, date) = layout::date_parts(mtime);
             *map.entry((date, year)).or_default() += 1;
         }

@@ -1,7 +1,6 @@
 //! Apple Photos import via `osascript`. (PhotoKit Swift sidecar is a future upgrade, §14.)
 
 use crate::config::AfterImport;
-use crate::ingest::DateGroup;
 use crate::util::{ext_matches, is_hidden, move_file, NameFilter};
 use crate::{layout, Error, Result};
 use std::collections::BTreeMap;
@@ -124,20 +123,6 @@ pub enum AlbumTarget {
         template: String,
         names: BTreeMap<String, String>,
     },
-}
-
-/// Distinct capture dates (from mtime) across a flat file list, for the naming form.
-pub fn date_groups(files: &[PathBuf]) -> Vec<DateGroup> {
-    let mut map: BTreeMap<(String, String), usize> = BTreeMap::new(); // (date, year) -> count
-    for f in files {
-        if let Ok(mtime) = std::fs::metadata(f).and_then(|m| m.modified()) {
-            let (year, date) = layout::date_parts(mtime);
-            *map.entry((date, year)).or_default() += 1;
-        }
-    }
-    map.into_iter()
-        .map(|((date, year), file_count)| DateGroup { date, year, file_count })
-        .collect()
 }
 
 /// Group files by the album name a date template renders for each file's mtime.

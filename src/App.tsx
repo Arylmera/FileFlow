@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import * as api from "./api";
-import type { ActivityEntry, CardReady, Config, PhotosReady, Progress } from "./api";
+import type { ActivityEntry, CardReady, Config, DrivePending, PhotosReady, Progress } from "./api";
+import { DriveDoneForm } from "./components/DriveDoneForm";
 import { NamingForm, type NamingReq } from "./components/NamingForm";
 import { ActivityView } from "./views/ActivityView";
 import { CardsView } from "./views/CardsView";
@@ -31,6 +32,8 @@ export default function App() {
   const [dirty, setDirty] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [naming, setNaming] = useState<NamingReq | null>(null);
+  // Drives waiting on an "Ask first" erase/eject answer, shown one at a time.
+  const [pendingDrives, setPendingDrives] = useState<DrivePending[]>([]);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [platform, setPlatform] = useState("macos");
 
@@ -50,6 +53,9 @@ export default function App() {
       ),
       listen<PhotosReady>("photos-ready", (e) =>
         setNaming({ kind: "photos", index: e.payload.index, label: "Import to Photos", dates: e.payload.dates }),
+      ),
+      listen<DrivePending>("drive-pending", (e) =>
+        setPendingDrives((q) => [...q.filter((d) => d.uuid !== e.payload.uuid), e.payload]),
       ),
     ];
     return () => {
@@ -99,7 +105,7 @@ export default function App() {
 
       <main>
         {tab === "flow" && (
-          <FlowView config={config} onNeedNames={setNaming} onNavigate={setTab} />
+          <FlowView config={config} dirty={dirty} onNeedNames={setNaming} onNavigate={setTab} />
         )}
         {tab === "status" && (
           <StatusView
@@ -110,7 +116,7 @@ export default function App() {
         )}
         {tab === "cards" && <CardsView config={config} patch={patchConfig} />}
         {tab === "folders" && (
-          <FoldersView config={config} patch={patchConfig} isMac={platform === "macos"} />
+          <FoldersView config={config} patch={patchConfig} isMac={platform === "macos"} dirty={dirty} />
         )}
         {tab === "activity" && <ActivityView activity={activity} />}
         {tab === "settings" && (
@@ -128,6 +134,14 @@ export default function App() {
               : config.folder[naming.index]?.name_mode ?? "per_date"
           }
           onClose={() => setNaming(null)}
+        />
+      )}
+
+      {!naming && pendingDrives[0] && (
+        <DriveDoneForm
+          key={pendingDrives[0].uuid}
+          req={pendingDrives[0]}
+          onClose={() => setPendingDrives((q) => q.slice(1))}
         />
       )}
     </div>
