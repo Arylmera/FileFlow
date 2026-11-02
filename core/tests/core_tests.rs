@@ -1,7 +1,7 @@
 use fileflow_core::config::{
-    AfterImport, CardRule, CleanupPolicy, EjectPolicy, FolderRule, NameMode, Route,
+    AfterImport, CardRule, CleanupPolicy, EjectPolicy, FolderRule, NameMode, RawJpeg, Route,
 };
-use fileflow_core::folder::run_folder_move;
+use fileflow_core::folder::{run_folder_move, undo_moves};
 use fileflow_core::ingest::{
     cleanup, plan_ingest, run_ingest, scan_dates, scan_files, FailedCopy, IngestReport,
 };
@@ -27,6 +27,8 @@ fn rule(sources: &[&str], dest: &str, exts: &[&str]) -> CardRule {
         include: String::new(),
         exclude: String::new(),
         routes: vec![],
+        backup_dest: String::new(),
+        raw_jpeg: RawJpeg::Independent,
     }
 }
 
@@ -371,6 +373,7 @@ fn cleanup_blocked_leaves_card_untouched() {
         skipped: vec![],
         folders: vec![],
         failed: vec![FailedCopy { src: PathBuf::from("/nope/b.arw"), error: "boom".into() }],
+        bytes: 0,
     };
     assert!(cleanup(&report).is_err(), "any failure blocks cleanup");
     assert!(src.exists(), "no source deleted when the set is not fully clean");
@@ -453,6 +456,7 @@ fn folder_rule(watch: &str, dest: &str) -> FolderRule {
         extensions: vec![],
         include: String::new(),
         exclude: String::new(),
+        recursive: false,
         target: fileflow_core::config::Destination::Folder {
             dest: dest.into(),
             layout: "{date}".into(),
@@ -471,7 +475,7 @@ fn folder_move_relocates_into_dated_dest() {
     write_file(&a, b"x", DAY_A);
 
     let report =
-        run_folder_move(&folder_rule(watch.to_str().unwrap(), dest.to_str().unwrap()), |_, _| {})
+        run_folder_move(&folder_rule(watch.to_str().unwrap(), dest.to_str().unwrap()), &Default::default(), |_, _| {})
             .unwrap();
     assert_eq!(report.moved.len(), 1);
     assert!(report.failed.is_empty());
@@ -493,7 +497,7 @@ fn folder_move_emits_final_progress_tick() {
     write_file(&watch.join("a.jpg"), b"x", DAY_A);
 
     let mut ticks = Vec::new();
-    run_folder_move(&folder_rule(watch.to_str().unwrap(), dest.to_str().unwrap()), |d, t| {
+    run_folder_move(&folder_rule(watch.to_str().unwrap(), dest.to_str().unwrap()), &Default::default(), |d, t| {
         ticks.push((d, t))
     })
     .unwrap();
@@ -508,7 +512,7 @@ fn folder_move_errors_when_dest_unavailable() {
     write_file(&watch.join("a.jpg"), b"x", DAY_A);
 
     let missing = dir.path().join("does-not-exist");
-    let r = run_folder_move(&folder_rule(watch.to_str().unwrap(), missing.to_str().unwrap()), |_, _| {});
+    let r = run_folder_move(&folder_rule(watch.to_str().unwrap(), missing.to_str().unwrap()), &Default::default(), |_, _| {});
     assert!(r.is_err(), "missing dest root → error");
     assert!(watch.join("a.jpg").exists(), "source untouched when dest unavailable");
 }
@@ -649,4 +653,169 @@ fn scan_folder_applies_name_filter() {
     let files = scan_folder(root, &["jpg".into()], &filter);
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].file_name().unwrap(), "keep.jpg");
+}
+
+#[test]
+fn folder_move_never_overwrites_and_dedups_identical() {
+    let dir = tempfile::tempdir().unwrap();
+    let watch = dir.path().join("incoming");
+    let dest = dir.path().join("sorted");
+    std::fs::create_dir_all(&dest).unwrap();
+    let day = dest.join(day_of(DAY_A));
+    // A different file already holds the name, and an identical one holds another.
+    write_file(&day.join("a.jpg"), b"OLD", DAY_A);
+    write_file(&day.join("b.jpg"), b"same", DAY_A);
+    write_file(&watch.join("a.jpg"), b"NEW", DAY_A);
+    write_file(&watch.join("b.jpg"), b"same", DAY_A);
+
+    let rule = folder_rule(watch.to_str().unwrap(), dest.to_str().unwrap());
+    let report = run_folder_move(&rule, &Default::default(), |_, _| {}).unwrap();
+    assert!(report.failed.is_empty());
+    assert_eq!(std::fs::read(day.join("a.jpg")).unwrap(), b"OLD", "existing file untouched");
+    assert_eq!(std::fs::read(day.join("a-1.jpg")).unwrap(), b"NEW", "new file de-collided");
+    assert!(!watch.join("b.jpg").exists(), "identical source removed");
+    assert!(!day.join("b-1.jpg").exists(), "no duplicate for identical content");
+}
+
+#[test]
+fn folder_move_undo_puts_files_back_and_ignore_skips_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let watch = dir.path().join("incoming");
+    let dest = dir.path().join("sorted");
+    std::fs::create_dir_all(&dest).unwrap();
+    let a = watch.join("a.jpg");
+    write_file(&a, b"x", DAY_A);
+    let rule = folder_rule(watch.to_str().unwrap(), dest.to_str().unwrap());
+
+    let report = run_folder_move(&rule, &Default::default(), |_, _| {}).unwrap();
+    assert!(!a.exists());
+    let back = undo_moves(&report.moved);
+    assert!(back.failed.is_empty() && a.exists(), "file restored to its source");
+
+    let ignore: std::collections::HashSet<PathBuf> = [a.clone()].into();
+    let again = run_folder_move(&rule, &ignore, |_, _| {}).unwrap();
+    assert!(again.moved.is_empty() && a.exists(), "an undone file isn't moved again");
+}
+
+#[test]
+fn recursive_scan_descends_but_skips_nested_destination() {
+    let dir = tempfile::tempdir().unwrap();
+    let watch = dir.path().join("in");
+    let dest = watch.join("sorted"); // destination nested inside the watch folder
+    std::fs::create_dir_all(&dest).unwrap();
+    write_file(&watch.join("sub/a.jpg"), b"x", DAY_A);
+    write_file(&dest.join("old.jpg"), b"y", DAY_A);
+
+    let mut rule = folder_rule(watch.to_str().unwrap(), dest.to_str().unwrap());
+    let flat = run_folder_move(&rule, &Default::default(), |_, _| {}).unwrap();
+    assert!(flat.moved.is_empty(), "top level only by default");
+
+    rule.recursive = true;
+    let deep = run_folder_move(&rule, &Default::default(), |_, _| {}).unwrap();
+    assert_eq!(deep.moved.len(), 1, "subfolder file moved, destination not rescanned");
+    assert!(dest.join("old.jpg").exists());
+}
+
+#[test]
+fn raw_jpeg_pairs_share_route_and_seq_or_skip_the_jpeg() {
+    let card = tempfile::tempdir().unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let raw_dest = tempfile::tempdir().unwrap();
+    for n in ["DSC1.ARW", "DSC1.JPG", "DSC2.JPG"] {
+        write_file(&card.path().join("DCIM").join(n), n.as_bytes(), DAY_A);
+    }
+    let mut r = rule(&["DCIM"], out.path().to_str().unwrap(), &[]);
+    r.rename = "{seq}".into();
+    r.routes = vec![Route { extensions: vec!["arw".into()], dest: raw_dest.path().to_str().unwrap().into(), layout: String::new() }];
+
+    r.raw_jpeg = RawJpeg::Together;
+    let plan = plan_ingest(&r, card.path(), &BTreeMap::new(), out.path());
+    let find = |n: &str| plan.iter().find(|p| p.src.ends_with(n)).unwrap();
+    assert_eq!(find("DSC1.JPG").root, raw_dest.path(), "paired JPEG follows its RAW's route");
+    assert_eq!(find("DSC1.JPG").dest_path.file_stem(), find("DSC1.ARW").dest_path.file_stem(), "pair shares {{seq}}");
+    assert_eq!(find("DSC2.JPG").root, out.path(), "lone JPEG keeps the default route");
+
+    r.raw_jpeg = RawJpeg::SkipJpeg;
+    let plan = plan_ingest(&r, card.path(), &BTreeMap::new(), out.path());
+    assert_eq!(plan.len(), 2, "JPEG with a RAW twin is skipped");
+    assert!(plan.iter().all(|p| !p.src.ends_with("DSC1.JPG")));
+}
+
+#[test]
+fn backup_plan_mirrors_into_one_root() {
+    let card = tempfile::tempdir().unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let backup = tempfile::tempdir().unwrap();
+    write_file(&card.path().join("DCIM/a.arw"), b"a", DAY_A);
+    let mut r = rule(&["DCIM"], out.path().to_str().unwrap(), &[]);
+    r.routes = vec![Route { extensions: vec!["arw".into()], dest: "/elsewhere".into(), layout: "RAW/{date}".into() }];
+    let plan = fileflow_core::ingest::plan_backup(&r, card.path(), &BTreeMap::new(), backup.path());
+    assert_eq!(plan[0].dest_path, backup.path().join("RAW").join(day_of(DAY_A)).join("a.arw"));
+    fileflow_core::ingest::check_space(&plan).unwrap();
+}
+
+#[test]
+fn exif_datetime_parses_and_rejects_unset_clock() {
+    let c = layout::parse_exif_datetime("2026:06:20 14:03:22").unwrap();
+    assert_eq!((c.year.as_str(), c.date.as_str(), c.time.as_str()), ("2026", "2026-06-20", "140322"));
+    assert!(layout::parse_exif_datetime("0000:00:00 00:00:00").is_none());
+    assert!(layout::parse_exif_datetime("").is_none());
+}
+
+#[test]
+fn filename_template_takes_capture_tokens() {
+    let cap = layout::Capture { year: "2026".into(), date: "2026-06-20".into(), time: "140322".into(), camera: "ILCE-7M4".into() };
+    assert_eq!(
+        layout::render_filename_cap("{date}_{time}_{camera}_{orig}_{seq}", &cap, "", 2, "arw", "DSC0001"),
+        "2026-06-20_140322_ILCE-7M4_DSC0001_0002.arw"
+    );
+}
+
+/// A minimal little-endian TIFF (the container ARW/NEF/DNG use) with Model in IFD0 and
+/// DateTimeOriginal in the Exif IFD.
+fn tiff_with_exif(model: &str, when: &str) -> Vec<u8> {
+    let mut b = Vec::new();
+    let u16le = |b: &mut Vec<u8>, v: u16| b.extend_from_slice(&v.to_le_bytes());
+    let u32le = |b: &mut Vec<u8>, v: u32| b.extend_from_slice(&v.to_le_bytes());
+    let (exif_ifd, dto_at) = (38u32, 56u32);
+    let model_at = dto_at + when.len() as u32 + 1;
+    b.extend_from_slice(b"II");
+    u16le(&mut b, 42);
+    u32le(&mut b, 8);
+    // IFD0: Model (ASCII), ExifIFDPointer (LONG)
+    u16le(&mut b, 2);
+    for (tag, typ, count, val) in [(0x0110u16, 2u16, model.len() as u32 + 1, model_at), (0x8769, 4, 1, exif_ifd)] {
+        u16le(&mut b, tag);
+        u16le(&mut b, typ);
+        u32le(&mut b, count);
+        u32le(&mut b, val);
+    }
+    u32le(&mut b, 0);
+    // Exif IFD: DateTimeOriginal
+    u16le(&mut b, 1);
+    u16le(&mut b, 0x9003);
+    u16le(&mut b, 2);
+    u32le(&mut b, when.len() as u32 + 1);
+    u32le(&mut b, dto_at);
+    u32le(&mut b, 0);
+    b.extend_from_slice(when.as_bytes());
+    b.push(0);
+    b.extend_from_slice(model.as_bytes());
+    b.push(0);
+    b
+}
+
+#[test]
+fn capture_date_comes_from_exif_over_mtime() {
+    let dir = tempfile::tempdir().unwrap();
+    let raw = dir.path().join("DSC0001.ARW");
+    write_file(&raw, &tiff_with_exif("ILCE-7M4", "2021:03:04 05:06:07"), DAY_A);
+    let cap = layout::capture_of(&raw).unwrap();
+    assert_eq!(cap.date, "2021-03-04", "EXIF date wins over the 2024 mtime");
+    assert_eq!(cap.time, "050607");
+    assert_eq!(cap.camera, "ILCE-7M4");
+
+    let plain = dir.path().join("note.jpg");
+    write_file(&plain, b"not really a jpeg", DAY_A);
+    assert_eq!(layout::capture_of(&plain).unwrap().date, day_of(DAY_A), "no EXIF → mtime");
 }

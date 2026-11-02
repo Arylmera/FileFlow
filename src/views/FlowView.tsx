@@ -1,14 +1,14 @@
 // The Flow map: a node-link graph of every automation — sources and
 // destinations deduplicate into nodes, each rule is an edge (see FlowGraph).
 // Selecting an edge surfaces its lane row with health, counts and actions.
-// The raw run history list lives behind the History tab.
+// The raw run history list lives behind the History tab, monthly totals behind Stats.
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import * as api from "../api";
 import type { Config } from "../api";
 import type { NamingReq } from "../components/NamingForm";
 import { FlowGraph } from "../components/FlowGraph";
-import { fmtCount, relTime } from "../lib/util";
+import { fmtBytes, fmtCount, fmtDuration, relTime } from "../lib/util";
 
 type LaneKind = "drive" | "photos" | "folder";
 
@@ -118,10 +118,14 @@ export function FlowView({
   onNavigate: (t: "cards" | "folders") => void;
 }) {
   const [runs, setRuns] = useState<api.RunRecord[]>([]);
-  const [mode, setMode] = useState<"map" | "history">("map");
+  const [undoable, setUndoable] = useState<string[]>([]);
+  const [mode, setMode] = useState<"map" | "history" | "stats">("map");
 
   useEffect(() => {
-    const refresh = () => api.getRuns(500).then(setRuns);
+    const refresh = () => {
+      api.getRuns(500).then(setRuns);
+      api.undoKeys().then(setUndoable);
+    };
     refresh();
     const subs = [listen("run", refresh), listen("activity", refresh)];
     return () => subs.forEach((u) => u.then((f) => f()));
@@ -152,6 +156,15 @@ export function FlowView({
     }
   }
 
+  async function undoLane(l: Lane) {
+    if (!confirm(`Put the files from “${l.label}”'s last move back in ${l.source}?`)) return;
+    try {
+      alert(await api.undoLast(l.key));
+    } catch (e) {
+      alert(String(e));
+    }
+  }
+
   return (
     <section>
       <header className="view-head">
@@ -169,6 +182,9 @@ export function FlowView({
           <button className={mode === "history" ? "on" : ""} onClick={() => setMode("history")}>
             History
           </button>
+          <button className={mode === "stats" ? "on" : ""} onClick={() => setMode("stats")}>
+            Stats
+          </button>
         </div>
       </header>
 
@@ -182,15 +198,27 @@ export function FlowView({
           </div>
         </div>
       ) : mode === "map" ? (
-        <FlowMap lanes={lanes} onRun={runLane} />
-      ) : (
+        <FlowMap lanes={lanes} undoable={undoable} onRun={runLane} onUndo={undoLane} />
+      ) : mode === "history" ? (
         <RunHistory runs={runs} />
+      ) : (
+        <Stats />
       )}
     </section>
   );
 }
 
-function FlowMap({ lanes, onRun }: { lanes: Lane[]; onRun: (l: Lane) => void }) {
+function FlowMap({
+  lanes,
+  undoable,
+  onRun,
+  onUndo,
+}: {
+  lanes: Lane[];
+  undoable: string[];
+  onRun: (l: Lane) => void;
+  onUndo: (l: Lane) => void;
+}) {
   const filesRouted = lanes.reduce((n, l) => n + l.routed, 0);
   const attention = lanes.filter((l) => l.run?.status === "failed").length;
   const [selected, setSelected] = useState<string | null>(null);
@@ -216,7 +244,11 @@ function FlowMap({ lanes, onRun }: { lanes: Lane[]; onRun: (l: Lane) => void }) 
       <FlowGraph lanes={lanes} selectedKey={selected} onSelect={setSelected} />
       {selLane ? (
         <div className="lanes">
-          <LaneRow lane={selLane} onRun={onRun} />
+          <LaneRow
+            lane={selLane}
+            onRun={onRun}
+            onUndo={selLane.kind === "folder" && undoable.includes(selLane.key) ? onUndo : undefined}
+          />
         </div>
       ) : (
         <p className="fg-hint">Select a flow to inspect it and run it.</p>
@@ -225,7 +257,15 @@ function FlowMap({ lanes, onRun }: { lanes: Lane[]; onRun: (l: Lane) => void }) 
   );
 }
 
-function LaneRow({ lane, onRun }: { lane: Lane; onRun: (l: Lane) => void }) {
+function LaneRow({
+  lane,
+  onRun,
+  onUndo,
+}: {
+  lane: Lane;
+  onRun: (l: Lane) => void;
+  onUndo?: (l: Lane) => void; // set when the lane's last move can be undone
+}) {
   const health = lane.run?.status ?? "idle";
   let healthText: string;
   if (!lane.run) {
@@ -263,15 +303,101 @@ function LaneRow({ lane, onRun }: { lane: Lane; onRun: (l: Lane) => void }) {
       </div>
       <div className="lane-actions">
         <button className="run" onClick={() => onRun(lane)}>
-          Run now
+          {health === "failed" || health === "partial" ? "Retry" : "Run now"}
         </button>
+        {onUndo && <button onClick={() => onUndo(lane)}>Undo last move</button>}
         {lane.revealPath && (
           <button onClick={() => api.revealInFinder(lane.revealPath).catch((e) => alert(String(e)))}>
             Reveal
           </button>
         )}
       </div>
+      {lane.run?.errors?.length ? <ErrorList errors={lane.run.errors} failed={lane.run.failed} /> : null}
     </div>
+  );
+}
+
+/** The per-file failures of one run, collapsed by default. */
+function ErrorList({ errors, failed }: { errors: string[]; failed: number }) {
+  const more = failed - errors.length;
+  return (
+    <details className="run-errors">
+      <summary>
+        {fmtCount(failed)} file{failed === 1 ? "" : "s"} failed — show why
+      </summary>
+      <ul>
+        {errors.map((e, i) => (
+          <li key={i}>{e}</li>
+        ))}
+        {more > 0 && <li className="muted">…and {fmtCount(more)} more (see the log file)</li>}
+      </ul>
+    </details>
+  );
+}
+
+/** Month-by-month totals over the whole run history. */
+function Stats() {
+  const [months, setMonths] = useState<api.MonthStats[] | null>(null);
+  useEffect(() => {
+    api.getStats().then(setMonths);
+  }, []);
+  if (months === null) return null;
+  if (months.length === 0) {
+    return (
+      <div className="empty">
+        <p>No runs recorded yet.</p>
+        <p className="hint">Monthly totals appear here once files start flowing.</p>
+      </div>
+    );
+  }
+  const total = months.reduce(
+    (t, m) => ({ files: t.files + m.files, bytes: t.bytes + m.bytes, drives: t.drives + m.drives }),
+    { files: 0, bytes: 0, drives: 0 },
+  );
+  return (
+    <>
+      <div className="flow-summary">
+        <div className="stat">
+          <span className="n">{fmtCount(total.files)}</span>
+          <span className="l">Files routed</span>
+        </div>
+        <div className="stat">
+          <span className="n">{fmtBytes(total.bytes)}</span>
+          <span className="l">Data moved</span>
+        </div>
+        <div className="stat">
+          <span className="n">{fmtCount(total.drives)}</span>
+          <span className="l">Drive imports</span>
+        </div>
+      </div>
+      <table className="stats-table">
+        <thead>
+          <tr>
+            <th>Month</th>
+            <th>Runs</th>
+            <th>Drives</th>
+            <th>Files</th>
+            <th>Data</th>
+            <th>Avg. run</th>
+            <th>Failed</th>
+          </tr>
+        </thead>
+        <tbody>
+          {months.map((m) => (
+            <tr key={m.month}>
+              <td>{m.month}</td>
+              <td>{fmtCount(m.runs)}</td>
+              <td>{fmtCount(m.drives)}</td>
+              <td>{fmtCount(m.files)}</td>
+              <td>{fmtBytes(m.bytes)}</td>
+              <td>{m.runs ? fmtDuration(m.duration_ms / m.runs) : "—"}</td>
+              <td className={m.failed_runs ? "warnN" : undefined}>{fmtCount(m.failed_runs)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="help">Runs recorded before this version have no size or duration.</p>
+    </>
   );
 }
 
@@ -303,6 +429,7 @@ function RunHistory({ runs }: { runs: api.RunRecord[] }) {
                 </>
               )}
               <span className="run-arrow"> → {r.dest}</span>
+              {r.errors?.length ? <ErrorList errors={r.errors} failed={r.failed} /> : null}
             </span>
           </li>
         );

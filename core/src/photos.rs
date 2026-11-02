@@ -37,14 +37,34 @@ fn quiet_len(p: &Path) -> Option<u64> {
 // ponytail: mtime-quiet + size-stable; a write that stalls for the entire re-check window
 // mid-file could still slip through. Add a writer marker (e.g. a `.part` rename) only if so.
 pub fn scan_folder(folder: &Path, extensions: &[String], filter: &NameFilter) -> Vec<PathBuf> {
+    scan_folder_deep(folder, extensions, filter, false, &[])
+}
+
+/// [`scan_folder`], optionally descending into subfolders. Hidden folders and anything
+/// under `skip` (the rule's destination/archive) are never entered.
+pub fn scan_folder_deep(
+    folder: &Path,
+    extensions: &[String],
+    filter: &NameFilter,
+    recursive: bool,
+    skip: &[PathBuf],
+) -> Vec<PathBuf> {
+    let skip: Vec<PathBuf> = skip.iter().map(|p| std::fs::canonicalize(p).unwrap_or_else(|_| p.clone())).collect();
+    let walker = walkdir::WalkDir::new(folder)
+        .min_depth(1)
+        .max_depth(if recursive { usize::MAX } else { 1 })
+        .into_iter()
+        .filter_entry(|e| {
+            !(e.file_type().is_dir()
+                && (is_hidden(e.path())
+                    || std::fs::canonicalize(e.path()).is_ok_and(|c| skip.iter().any(|s| c.starts_with(s)))))
+        });
     let mut candidates: Vec<(PathBuf, u64)> = Vec::new();
-    if let Ok(rd) = std::fs::read_dir(folder) {
-        for e in rd.flatten() {
-            let p = e.path();
-            if p.is_file() && !is_hidden(&p) && ext_matches(&p, extensions) && filter.accepts(&p) {
-                if let Some(len) = quiet_len(&p) {
-                    candidates.push((p, len));
-                }
+    for e in walker.flatten() {
+        let p = e.path();
+        if e.file_type().is_file() && !is_hidden(p) && ext_matches(p, extensions) && filter.accepts(p) {
+            if let Some(len) = quiet_len(p) {
+                candidates.push((p.to_path_buf(), len));
             }
         }
     }
@@ -125,7 +145,7 @@ pub enum AlbumTarget {
     },
 }
 
-/// Group files by the album name a date template renders for each file's mtime.
+/// Group files by the album name a date template renders for each file's capture date.
 /// Mirrors the card folder rules: {year}/{date}, with {name} from the `names` map.
 pub fn album_groups(
     files: &[PathBuf],
@@ -134,13 +154,12 @@ pub fn album_groups(
 ) -> BTreeMap<String, Vec<PathBuf>> {
     let mut groups: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
     for f in files {
-        let album = match std::fs::metadata(f).and_then(|m| m.modified()) {
-            Ok(mtime) => {
-                let (year, date) = layout::date_parts(mtime);
-                let name = names.get(&date).cloned().unwrap_or_default();
-                layout::render(template, &year, &date, &name)
+        let album = match layout::capture_of(f) {
+            Some(cap) => {
+                let name = names.get(&cap.date).cloned().unwrap_or_default();
+                layout::render_cap(template, &cap, &name)
             }
-            Err(_) => template.to_string(),
+            None => template.to_string(),
         };
         let album = if album.is_empty() { "Imported".to_string() } else { album };
         groups.entry(album).or_default().push(f.clone());

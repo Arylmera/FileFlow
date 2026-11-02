@@ -6,6 +6,24 @@ export const listToCsv = (l: string[]) => l.join(", ");
 
 export const fmtCount = (n: number) => n.toLocaleString();
 
+/** "1.4 GB"-style size (decimal units, like Finder). */
+export function fmtBytes(n: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = n;
+  let u = 0;
+  while (v >= 1000 && u < units.length - 1) {
+    v /= 1000;
+    u++;
+  }
+  return u === 0 ? `${n} B` : `${v.toFixed(1)} ${units[u]}`;
+}
+
+/** "4.2 s" / "3 min" duration. */
+export function fmtDuration(ms: number): string {
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  return `${Math.round(ms / 60_000)} min`;
+}
+
 /** "just now" / "5m ago" / "3h ago" / "2d ago" / a date. */
 export function relTime(ts: string): string {
   const t = new Date(ts).getTime();

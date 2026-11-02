@@ -30,7 +30,7 @@ serde_json.workspace = true
 
 # GetLogicalDrives/GetDriveTypeW keep the 5s drive poll off PowerShell.
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Power"] }
 
 # diskutil plist parsing only exists on the macOS volume path.
 [target.'cfg(target_os = "macos")'.dependencies]

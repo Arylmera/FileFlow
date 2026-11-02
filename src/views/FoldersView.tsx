@@ -1,5 +1,7 @@
 // Watched-folder rules: move new files into a dated folder, or (on macOS)
 // import them into Apple Photos.
+import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import * as api from "../api";
 import type { AfterImport, AlbumMode, Config, FolderKind, FolderRule, NameMode } from "../api";
 import { CsvField, DestField, Field, Group, RegexField } from "../components/fields";
@@ -24,6 +26,15 @@ export function FoldersView({
   const addPhotos = () => patch({ folder: [...config.folder, api.newPhotosFolder()] });
   // A rule loaded from disk only carries its own kind's fields; flipping kind
   // backfills the other kind's defaults so its form fields are defined.
+  // Which saved rules are actually being watched (a missing folder isn't).
+  const [watched, setWatched] = useState<boolean[]>([]);
+  useEffect(() => {
+    api.folderWatchStatus().then(setWatched);
+    const sub = listen<boolean[]>("watch-status", (e) => setWatched(e.payload));
+    return () => {
+      sub.then((f) => f());
+    };
+  }, []);
   const flipKind = (i: number, kind: FolderKind) => {
     const base = kind === "photos" ? api.newPhotosFolder() : api.newFolder();
     update(i, { ...base, ...config.folder[i], kind });
@@ -66,7 +77,19 @@ export function FoldersView({
               </strong>
               {rule.watch && (
                 <div className="card-sub muted">
-                  {rule.watch} → {rule.kind === "photos" ? "Photos" : rule.dest || "…"}
+                  {rule.watch} → {rule.kind === "photos" ? "Photos" : rule.dest || "…"}{" "}
+                  {!dirty && watched[i] !== undefined && (
+                    watched[i] ? (
+                      <span className="badge ok">watching</span>
+                    ) : (
+                      <span
+                        className="badge warn"
+                        title="The folder doesn't exist right now (e.g. a share that isn't mounted). FileFlow starts watching it as soon as it appears."
+                      >
+                        not watched — folder missing
+                      </span>
+                    )
+                  )}
                 </div>
               )}
             </div>
@@ -111,6 +134,19 @@ export function FoldersView({
               </button>
             </div>
           </Field>
+
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={rule.recursive}
+              onChange={(e) => update(i, { recursive: e.target.checked })}
+            />
+            Include subfolders
+          </label>
+          <p className="help check-help">
+            Also handle files inside folders within the watch folder. The destination
+            {rule.kind === "photos" ? " and archive folder are" : " folder is"} always skipped.
+          </p>
 
           <Field label="Destination" help="What to do with new files in this folder.">
             <select value={rule.kind} onChange={(e) => flipKind(i, e.target.value as FolderKind)}>
@@ -162,7 +198,7 @@ export function FoldersView({
               />
               <Field
                 label="Folder structure"
-                help="Subfolders created at the destination. Tokens: {year}, {date}. Leave blank to move files in flat."
+                help="Subfolders created at the destination. Tokens: {year}, {date}, {camera}. Dates come from the photo's EXIF when it has one. Leave blank to move files in flat."
               >
                 <input
                   placeholder="{year}/{date}"

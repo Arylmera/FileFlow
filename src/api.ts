@@ -7,6 +7,8 @@ export type EjectPolicy = "never" | "ask" | "always";
 export type AfterImport = "archive" | "delete" | "leave";
 export type AlbumMode = "library" | "fixed" | "template";
 export type FolderKind = "folder" | "photos";
+export type RawJpeg = "independent" | "together" | "skip_jpeg";
+export type NotifyLevel = "all" | "errors" | "off";
 
 // An extension→destination override within a card rule. Blank dest/layout reuse the rule's.
 export interface Route {
@@ -32,6 +34,10 @@ export interface CardRule {
   exclude: string;
   routes: Route[];
   rename: string;
+  // Second destination: every file is also copied + verified here; the drive is only
+  // erased once both copies verified. Blank = no backup.
+  backup_dest: string;
+  raw_jpeg: RawJpeg;
 }
 
 export interface AppSettings {
@@ -41,6 +47,11 @@ export interface AppSettings {
   show_dock_icon: boolean;
   show_tray_icon: boolean;
   log_level: string;
+  notify: NotifyLevel;
+  // Automatic runs only start between these local HH:MM times (both blank = any time).
+  run_from: string;
+  run_until: string;
+  pause_on_battery: boolean;
 }
 
 // A watched-folder rule: move new files to a folder (`kind: "folder"`) or import
@@ -53,6 +64,7 @@ export interface FolderRule {
   // Regex name filters (see CardRule): include = whitelist, exclude = blacklist.
   include: string;
   exclude: string;
+  recursive: boolean; // also handle files in subfolders
   // Folder destination
   dest: string;
   layout: string;
@@ -108,6 +120,20 @@ export interface RunRecord {
   failed: number;
   status: string; // "ok" | "partial" | "failed"
   detail: string;
+  bytes: number;
+  duration_ms: number;
+  errors?: string[]; // per-file failures, "name: error"
+}
+
+// Totals for one month ("YYYY-MM") of run history.
+export interface MonthStats {
+  month: string;
+  runs: number;
+  failed_runs: number;
+  drives: number;
+  files: number;
+  bytes: number;
+  duration_ms: number;
 }
 
 export interface CardReady {
@@ -146,13 +172,25 @@ const inTauri =
 export const emptyConfig: Config = {
   card: [],
   folder: [],
-  app: { autostart: true, keep_running_on_close: true, start_minimized: false, show_dock_icon: false, show_tray_icon: true, log_level: "info" },
+  app: {
+    autostart: true,
+    keep_running_on_close: true,
+    start_minimized: false,
+    show_dock_icon: false,
+    show_tray_icon: true,
+    log_level: "info",
+    notify: "all",
+    run_from: "",
+    run_until: "",
+    pause_on_battery: false,
+  },
 };
 
 // Shared defaults for the per-kind fields a rule doesn't use.
 const folderDefaults = {
   include: "",
   exclude: "",
+  recursive: false,
   album_mode: "fixed" as AlbumMode,
   photos_album: "Lightroom",
   skip_duplicates: true,
@@ -203,6 +241,8 @@ export function newCard(): CardRule {
     exclude: "",
     routes: [],
     rename: "",
+    backup_dest: "",
+    raw_jpeg: "independent",
   };
 }
 
@@ -235,6 +275,12 @@ export const getPaused = () => load<boolean>("get_paused", {}, false);
 export const setPaused = (paused: boolean) => invoke<void>("set_paused", { paused });
 export const revealInFinder = (path: string) => invoke<void>("reveal_in_finder", { path });
 export const logPath = () => invoke<string>("log_path");
+export const getStats = () => load<MonthStats[]>("get_stats", {}, []);
+export const undoLast = (ruleKey: string) => invoke<string>("undo_last", { ruleKey });
+export const undoKeys = () => load<string[]>("undo_keys", {}, []);
+export const folderWatchStatus = () => load<boolean[]>("folder_watch_status", {}, []);
+export const exportConfig = (path: string) => invoke<void>("export_config", { path });
+export const importConfig = (path: string) => invoke<Config>("import_config", { path });
 
 // The OS the shell was built for ("macos" | "windows" | "linux"). Cached — it can't
 // change while the app runs. Drives platform-only UI (Apple Photos, Dock wording).

@@ -22,6 +22,10 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    /// Pre-flight: the new files don't fit at the destination, so nothing was copied.
+    #[error("not enough space at {dest}: need {}, {} free", crate::util::fmt_bytes(*needed), crate::util::fmt_bytes(*available))]
+    NoSpace { dest: PathBuf, needed: u64, available: u64 },
+
     #[error("eject failed for {0}")]
     EjectFailed(PathBuf),
 

@@ -1,7 +1,7 @@
 // External Drive rules: what to copy off a recognised drive, where it lands,
 // and what happens to the drive afterwards.
 import * as api from "../api";
-import type { CardRule, CleanupPolicy, Config, EjectPolicy, NameMode, Route } from "../api";
+import type { CardRule, CleanupPolicy, Config, EjectPolicy, NameMode, RawJpeg, Route } from "../api";
 import { CsvField, DestField, Field, Group, RegexField } from "../components/fields";
 import { filenameExample, layoutExample } from "../lib/examples";
 
@@ -111,13 +111,26 @@ export function CardsView({ config, patch }: { config: Config; patch: (p: Partia
               value={card.exclude}
               onChange={(v) => updateCard(i, { exclude: v })}
             />
+            <Field
+              label="RAW + JPEG pairs"
+              help="Shots saved twice with the same name (DSC0001.ARW + DSC0001.JPG). Skipped JPEGs stay on the drive, even after a clean."
+            >
+              <select
+                value={card.raw_jpeg}
+                onChange={(e) => updateCard(i, { raw_jpeg: e.target.value as RawJpeg })}
+              >
+                <option value="independent">Copy each file on its own</option>
+                <option value="together">Keep pairs together (same folder and number)</option>
+                <option value="skip_jpeg">Copy only the RAW</option>
+              </select>
+            </Field>
           </Group>
 
           <Group title="Where photos go">
             <DestField value={card.dest} onChange={(v) => updateCard(i, { dest: v })} />
             <Field
               label="Folder structure"
-              help="Template for the folders created at the destination. Tokens: {year}, {date}, {name}."
+              help="Template for the folders created at the destination. Tokens: {year}, {date}, {name}, {camera}. Dates come from the photo's EXIF when it has one."
             >
               <input
                 placeholder="{year}/{date} {name}"
@@ -130,7 +143,7 @@ export function CardsView({ config, patch }: { config: Config; patch: (p: Partia
             </p>
             <Field
               label="Rename files (optional)"
-              help="Rename each file as it's copied. Tokens: {year}, {date}, {name}, {seq}. The original extension is always kept. Blank = keep original names."
+              help="Rename each file as it's copied. Tokens: {year}, {date}, {time}, {camera}, {orig} (original name), {name}, {seq}. The original extension is always kept. Blank = keep original names."
             >
               <input
                 placeholder="{date}_{seq}"
@@ -141,6 +154,13 @@ export function CardsView({ config, patch }: { config: Config; patch: (p: Partia
             <p className="preview">
               Example: <code>{filenameExample(card.rename)}</code>
             </p>
+            <DestField
+              label="Backup copy (optional)"
+              placeholder="/Volumes/NAS/Backup"
+              value={card.backup_dest}
+              onChange={(v) => updateCard(i, { backup_dest: v })}
+              help="Also copy every file here, with the same folders. The drive is only cleaned once both copies are verified. Blank = no backup."
+            />
           </Group>
 
           <RoutesEditor

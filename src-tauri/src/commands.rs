@@ -1,6 +1,6 @@
 //! Thin, typed IPC surface over the core engine + watchers.
 
-use crate::state::{ActivityEntry, AppState, RunRecord};
+use crate::state::{ActivityEntry, AppState, MonthStats, RunRecord};
 use crate::{volume, watchers};
 use fileflow_core::config::{AfterImport, CardRule, Config, Destination, EjectPolicy};
 use fileflow_core::ingest::{self, DateGroup};
@@ -30,6 +30,7 @@ pub fn get_config(state: State<AppState>) -> Config {
 ///   the process's working directory.
 fn validate(config: &Config) -> Result<(), String> {
     use fileflow_core::util::validate_regex;
+    config.app.validate_window()?;
     let name = |label: &str| if label.is_empty() { "(unnamed)".to_string() } else { label.to_string() };
     let check = |pat: &str, which: &str, what: &str, label: &str| {
         validate_regex(pat)
@@ -159,6 +160,48 @@ pub fn get_runs(state: State<AppState>, limit: usize) -> Vec<RunRecord> {
     state.recent_runs(limit)
 }
 
+/// Month-by-month totals over the full run history (newest first).
+#[tauri::command]
+pub fn get_stats(state: State<AppState>) -> Vec<MonthStats> {
+    state.stats()
+}
+
+/// Revert a folder rule's last move (`rule_key` = `folder:{watch}`).
+#[tauri::command]
+pub fn undo_last(app: AppHandle, rule_key: String) -> Result<String, String> {
+    watchers::undo_last(&app, &rule_key)
+}
+
+/// Rule keys whose last move can be undone.
+#[tauri::command]
+pub fn undo_keys(state: State<AppState>) -> Vec<String> {
+    state.undo_keys()
+}
+
+/// Per folder rule (by index): is its watch folder being watched right now?
+#[tauri::command]
+pub fn folder_watch_status(app: AppHandle) -> Vec<bool> {
+    watchers::folder_watch_status(&app)
+}
+
+/// Write the saved rules + settings to `path` as TOML (a backup or a transfer file).
+#[tauri::command]
+pub fn export_config(state: State<AppState>, path: PathBuf) -> Result<(), String> {
+    state.snapshot().save(&path).map_err(|e| e.to_string())
+}
+
+/// Read a config file for the editor. Nothing is applied here: the UI loads it as
+/// unsaved changes, so the user reviews it and Save runs the usual validation.
+#[tauri::command]
+pub fn import_config(path: PathBuf) -> Result<Config, String> {
+    if !path.is_file() {
+        return Err(format!("{} is not a file", path.display()));
+    }
+    let config = Config::load(&path).map_err(|e| e.to_string())?;
+    validate(&config)?;
+    Ok(config)
+}
+
 /// True if `path` (after `~` expansion) is an existing, writable directory.
 /// Drives the Cards form's live "reachable & writable?" indicator.
 #[tauri::command]
@@ -235,5 +278,16 @@ mod tests {
         assert!(validate(&photos("")).is_err(), "archive with no folder is rejected");
         assert!(validate(&photos("~/done")).is_ok());
         assert!(validate(&cfg(json!({ "watch": "~/in", "kind": "folder", "include": "(" }))).is_err());
+    }
+
+    #[test]
+    fn import_round_trips_an_export() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rules.toml");
+        let c = cfg(json!({ "watch": "~/in", "kind": "folder", "dest": "~/out", "recursive": true }));
+        c.save(&path).unwrap();
+        let back = super::import_config(path).unwrap();
+        assert!(back.folders[0].recursive);
+        assert!(super::import_config(dir.path().join("missing.toml")).is_err());
     }
 }

@@ -4,13 +4,12 @@
 //! if every file verified does deletion run. [`cleanup`] re-checks this itself, so the
 //! all-or-nothing guarantee holds even if a caller forgets to.
 
-use crate::config::{CardRule, EjectPolicy};
-use crate::util::{ext_matches, is_hidden, NameFilter};
+use crate::config::{CardRule, EjectPolicy, RawJpeg};
+use crate::util::{available_space, copy_verified, ext_matches, files_equal, is_hidden, with_suffix, NameFilter};
 use crate::layout;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashSet};
-use std::io::Read;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::process::Command;
@@ -28,6 +27,8 @@ pub struct DateGroup {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannedCopy {
     pub src: PathBuf,
+    /// The destination root this copy lands under (the rule's, a route's, or the backup).
+    pub root: PathBuf,
     /// Relative destination folder (rendered from the layout), for reporting.
     pub folder: String,
     pub dest_dir: PathBuf,
@@ -49,6 +50,8 @@ pub struct IngestReport {
     /// Distinct relative destination folders touched.
     pub folders: Vec<String>,
     pub failed: Vec<FailedCopy>,
+    /// Bytes written this run (copied files only).
+    pub bytes: u64,
 }
 
 impl IngestReport {
@@ -95,6 +98,9 @@ pub fn resolve_dest(rule: &CardRule, volume_root: &Path) -> Result<PathBuf> {
         if !r.dest.is_empty() {
             check_dest(&expand(&r.dest), volume_root)?;
         }
+    }
+    if !rule.backup_dest.is_empty() {
+        check_dest(&expand(&rule.backup_dest), volume_root)?;
     }
     Ok(dest)
 }
@@ -168,24 +174,19 @@ pub fn scan_files(rule: &CardRule, volume_root: &Path) -> Vec<PathBuf> {
     out
 }
 
-fn mtime_of(p: &Path) -> Option<std::time::SystemTime> {
-    std::fs::metadata(p).ok()?.modified().ok()
-}
-
-/// Group matching files by capture date (from mtime), sorted ascending by date.
+/// Group matching files by capture date (EXIF, else mtime), sorted ascending by date.
 /// Runs before prompting so the UI can ask for a name per date.
 pub fn scan_dates(rule: &CardRule, volume_root: &Path) -> Vec<DateGroup> {
     date_groups(&scan_files(rule, volume_root))
 }
 
-/// Distinct capture dates (from mtime) across a file list, sorted ascending — the
+/// Distinct capture dates (EXIF, else mtime) across a file list, sorted ascending — the
 /// naming form's input for both the drive and the Photos flow.
 pub fn date_groups(files: &[PathBuf]) -> Vec<DateGroup> {
     let mut map: BTreeMap<(String, String), usize> = BTreeMap::new(); // (date, year) -> count
     for f in files {
-        if let Some(mtime) = mtime_of(f) {
-            let (year, date) = layout::date_parts(mtime);
-            *map.entry((date, year)).or_default() += 1;
+        if let Some(c) = layout::capture_of(f) {
+            *map.entry((c.date, c.year)).or_default() += 1;
         }
     }
     map.into_iter()
@@ -193,13 +194,15 @@ pub fn date_groups(files: &[PathBuf]) -> Vec<DateGroup> {
         .collect()
 }
 
-/// Insert `-{n}` before the extension: `a.arw` → `a-1.arw`. Used to de-collide.
-fn with_suffix(name: &Path, n: usize) -> PathBuf {
-    let stem = name.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-    match name.extension().and_then(|e| e.to_str()) {
-        Some(ext) => PathBuf::from(format!("{stem}-{n}.{ext}")),
-        None => PathBuf::from(format!("{stem}-{n}")),
-    }
+/// Camera RAW extensions recognised for RAW+JPEG pairing.
+const RAW_EXTS: &[&str] = &[
+    "arw", "srf", "sr2", "cr2", "cr3", "crw", "nef", "nrw", "raf", "orf", "rw2", "dng", "pef", "srw",
+    "3fr", "iiq", "x3f", "raw", "rwl",
+];
+const JPEG_EXTS: &[&str] = &["jpg", "jpeg", "hif", "heif", "heic"];
+
+fn ext_in(p: &Path, set: &[&str]) -> bool {
+    p.extension().and_then(|e| e.to_str()).is_some_and(|e| set.iter().any(|x| x.eq_ignore_ascii_case(e)))
 }
 
 /// Compute the copy plan. `names` maps `YYYY-MM-DD` → folder name; missing = empty.
@@ -220,15 +223,30 @@ pub fn plan_ingest(
     names: &BTreeMap<String, String>,
     dest_root: &Path,
 ) -> Vec<PlannedCopy> {
+    let files = scan_files(rule, volume_root);
+    // RAW twin of each JPEG, keyed by path-without-extension (same folder, same stem).
+    let raws: HashMap<PathBuf, &PathBuf> = if rule.raw_jpeg == RawJpeg::Independent {
+        HashMap::new()
+    } else {
+        files.iter().filter(|f| ext_in(f, RAW_EXTS)).map(|f| (f.with_extension(""), f)).collect()
+    };
+    let twin = |f: &Path| ext_in(f, JPEG_EXTS).then(|| raws.get(&f.with_extension("")).copied()).flatten();
+
     let mut plan = Vec::new();
     let mut seq: BTreeMap<PathBuf, usize> = BTreeMap::new(); // dest_dir -> last seq used
-    for src in scan_files(rule, volume_root) {
-        let Some(mtime) = mtime_of(&src) else { continue };
-        let (year, date) = layout::date_parts(mtime);
-        let name = names.get(&date).cloned().unwrap_or_default();
+    let mut pair_seq: HashMap<(PathBuf, PathBuf), usize> = HashMap::new(); // (dest_dir, stem) -> seq
+    for src in files.iter().cloned() {
+        let raw_twin = twin(&src);
+        if rule.raw_jpeg == RawJpeg::SkipJpeg && raw_twin.is_some() {
+            continue; // the RAW carries the shot; this JPEG stays on the drive
+        }
+        let Some(cap) = layout::capture_of(&src) else { continue };
+        let name = names.get(&cap.date).cloned().unwrap_or_default();
 
         // First matching route overrides dest root + layout; else the rule's own.
-        let route = rule.routes.iter().find(|r| ext_matches(&src, &r.extensions));
+        // A paired JPEG routes as its RAW does, so the two never get split up.
+        let route_by = raw_twin.map(PathBuf::as_path).unwrap_or(&src);
+        let route = rule.routes.iter().find(|r| ext_matches(route_by, &r.extensions));
         let root = match route {
             Some(r) if !r.dest.is_empty() => expand(&r.dest),
             _ => dest_root.to_path_buf(),
@@ -238,44 +256,69 @@ pub fn plan_ingest(
             _ => rule.layout.as_str(),
         };
 
-        let folder = layout::render(lay, &year, &date, &name);
+        let folder = layout::render_cap(lay, &cap, &name);
         let dest_dir = root.join(&folder);
 
         let Some(orig) = src.file_name() else { continue };
         let file_name = if rule.rename.is_empty() {
             PathBuf::from(orig)
         } else {
-            let n = seq.entry(dest_dir.clone()).or_insert(0);
-            *n += 1;
+            let pair_key = (dest_dir.clone(), src.with_extension(""));
+            let n = match (rule.raw_jpeg, pair_seq.get(&pair_key)) {
+                (RawJpeg::Together, Some(n)) => *n, // the twin already took a number
+                _ => {
+                    let n = seq.entry(dest_dir.clone()).or_insert(0);
+                    *n += 1;
+                    pair_seq.insert(pair_key, *n);
+                    *n
+                }
+            };
             let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("");
-            PathBuf::from(layout::render_filename(&rule.rename, &year, &date, &name, *n, ext))
+            let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            PathBuf::from(layout::render_filename_cap(&rule.rename, &cap, &name, n, ext, stem))
         };
         let dest_path = dest_dir.join(&file_name);
-        plan.push(PlannedCopy { src, folder, dest_dir, dest_path });
+        plan.push(PlannedCopy { src, root, folder, dest_dir, dest_path });
     }
     plan
 }
 
-/// Whole-file byte comparison. Callers pre-check equal length, so this only confirms
-/// that two same-sized files are truly identical. Used both to prove an existing dest
-/// is a prior import (skip path) and to verify every fresh copy before it counts.
-fn files_equal(a: &Path, b: &Path, len: u64) -> bool {
-    let (Ok(mut fa), Ok(mut fb)) = (std::fs::File::open(a), std::fs::File::open(b)) else {
-        return false;
-    };
-    let (mut ba, mut bb) = ([0u8; 65536], [0u8; 65536]);
-    let mut remaining = len;
-    while remaining > 0 {
-        let n = remaining.min(ba.len() as u64) as usize;
-        if fa.read_exact(&mut ba[..n]).is_err() || fb.read_exact(&mut bb[..n]).is_err() {
-            return false;
-        }
-        if ba[..n] != bb[..n] {
-            return false;
-        }
-        remaining -= n as u64;
+/// The plan for a rule's backup copy: the same files and folder structure under
+/// `backup_root`. Route *destinations* are ignored (everything mirrors into the one
+/// backup root) but route layouts still apply, so the backup tree matches the primary.
+pub fn plan_backup(
+    rule: &CardRule,
+    volume_root: &Path,
+    names: &BTreeMap<String, String>,
+    backup_root: &Path,
+) -> Vec<PlannedCopy> {
+    let mut mirror = rule.clone();
+    for r in &mut mirror.routes {
+        r.dest.clear();
     }
-    true
+    plan_ingest(&mirror, volume_root, names, backup_root)
+}
+
+/// Refuse a plan whose new bytes don't fit at their destination. Files already present
+/// with the same size count as zero (they'll be skipped). Destinations whose free space
+/// can't be measured are not checked.
+pub fn check_space(plan: &[PlannedCopy]) -> Result<()> {
+    let mut need: BTreeMap<&Path, u64> = BTreeMap::new();
+    for pc in plan {
+        let len = std::fs::metadata(&pc.src).map(|m| m.len()).unwrap_or(0);
+        let present = std::fs::metadata(&pc.dest_path).is_ok_and(|m| m.len() == len);
+        if !present {
+            *need.entry(&pc.root).or_default() += len;
+        }
+    }
+    for (root, needed) in need {
+        if let Some(available) = available_space(root) {
+            if needed > available {
+                return Err(Error::NoSpace { dest: root.to_path_buf(), needed, available });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// What [`resolve_target`] decided for one planned copy — both variants carry the dest
@@ -317,7 +360,8 @@ fn resolve_target(pc: &PlannedCopy, src_len: u64, claimed: &HashSet<PathBuf>) ->
     }
 }
 
-/// Execute the plan: create dirs, copy preserving mtime, verify size + full byte compare.
+/// Execute the plan: create dirs, copy preserving mtime, verify size + full byte compare
+/// (callers run [`check_space`] first).
 /// A vanished/unreachable destination surfaces here as failed copies → cleanup is skipped.
 ///
 /// `on_progress(done, total)` is called before each file (done = files finished so far)
@@ -359,34 +403,13 @@ pub fn run_ingest(plan: &[PlannedCopy], mut on_progress: impl FnMut(usize, usize
             report.failed.push(FailedCopy { src: pc.src.clone(), error: e.to_string() });
             continue;
         }
-        if let Err(e) = std::fs::copy(&pc.src, &dest_path) {
+        // Verify every byte against a second read of the source before it counts: this
+        // run's sources may be deleted afterwards (see util::copy_verified).
+        if let Err(e) = copy_verified(&pc.src, &dest_path, src_len) {
             report.failed.push(FailedCopy { src: pc.src.clone(), error: e.to_string() });
             continue;
         }
-
-        // Verify size, then bytes: this run's sources may be deleted afterwards, so a
-        // silently corrupted copy must never count as verified. A bad dest is removed
-        // before failing so a re-run gets a clean slot.
-        // ponytail: full re-read of src+dest per file; switch to a streaming hash
-        // computed during the copy if ingest throughput ever matters.
-        let verified = std::fs::metadata(&dest_path)
-            .map(|m| m.len() == src_len)
-            .unwrap_or(false)
-            && files_equal(&pc.src, &dest_path, src_len);
-        if !verified {
-            let _ = std::fs::remove_file(&dest_path);
-            report.failed.push(FailedCopy {
-                src: pc.src.clone(),
-                error: "copy did not verify (size or content mismatch)".into(),
-            });
-            continue;
-        }
-
-        // Preserve mtime (std::fs::copy does not). Best-effort: a failure here isn't fatal.
-        if let Ok(meta) = std::fs::metadata(&pc.src) {
-            let mt = filetime::FileTime::from_last_modification_time(&meta);
-            let _ = filetime::set_file_mtime(&dest_path, mt);
-        }
+        report.bytes += src_len;
 
         report.copied.push(pc.src.clone());
         folders.insert(pc.folder.clone());

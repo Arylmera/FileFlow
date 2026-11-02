@@ -2,8 +2,12 @@
 // layout/rename/album template produces before saving it.
 
 /** A worked example of the folder a layout template produces. */
+// Shared sample values for the capture tokens every template accepts.
+const capture = (s: string) =>
+  s.replace(/\{time\}/g, "140322").replace(/\{camera\}/g, "ILCE-7M4");
+
 export function layoutExample(template: string): string {
-  const folder = template
+  const folder = capture(template)
     .replace(/\{year\}/g, "2026")
     .replace(/\{date\}/g, "2026-06-20")
     .replace(/\{name\}/g, "Holiday")
@@ -16,7 +20,7 @@ export function layoutExample(template: string): string {
 
 /** A worked example of where a folder-move rule lands a file. */
 export function folderExample(template: string): string {
-  const folder = template
+  const folder = capture(template)
     .replace(/\{year\}/g, "2026")
     .replace(/\{date\}/g, "2026-06-20")
     .replace(/\{name\}/g, "")
@@ -31,7 +35,8 @@ export function folderExample(template: string): string {
 export function filenameExample(template: string): string {
   if (!template.trim()) return "DSC0001.ARW (unchanged)";
   const stem =
-    template
+    capture(template)
+      .replace(/\{orig\}/g, "DSC0001")
       .replace(/\{year\}/g, "2026")
       .replace(/\{date\}/g, "2026-06-20")
       .replace(/\{name\}/g, "Holiday")
@@ -43,7 +48,7 @@ export function filenameExample(template: string): string {
 
 /** A worked example of the album name a date template produces. */
 export function albumExample(template: string, name = ""): string {
-  const rendered = template
+  const rendered = capture(template)
     .replace(/\{year\}/g, "2026")
     .replace(/\{date\}/g, "2026-06-20")
     .replace(/\{name\}/g, name)

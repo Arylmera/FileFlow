@@ -49,9 +49,11 @@ The goal is a tool you trust to run unattended and rarely need to open.
 
 Your files are irreplaceable, so the destructive path — wiping a drive after ingest — is deliberately paranoid:
 
-- **Verified copies** — every file is checked (byte size) at the destination before it counts as copied.
-- **All-or-nothing deletion** — the drive is wiped *only* after *every* file in the set has copied and verified. Any single failure — including the destination going unreachable mid-run — aborts deletion entirely, so a partial or interrupted copy can never lose data.
-- **Idempotent re-runs** — identical-size files already at the destination are skipped, so running it again is safe.
+- **Verified copies** — every copy is compared byte for byte against a second read of the source before it counts, so a corrupted write or a flaky card read is caught.
+- **All-or-nothing deletion** — the drive is wiped *only* after *every* file in the set has copied and verified — at the destination *and* the backup destination, if one is set. Any single failure — including the destination going unreachable mid-run — aborts deletion entirely, so a partial or interrupted copy can never lose data.
+- **Space checked first** — an import that won't fit at its destination doesn't start.
+- **Never overwrites** — a different file with the same name gets a `-1`, `-2`… suffix; byte-identical files already at the destination are skipped, so running it again is safe.
+- **Safe moves** — folder moves to another disk or a network share are copied, verified, and only then removed from the source; the last move of each folder rule can be undone.
 
 ## Install
 
@@ -102,6 +104,10 @@ Open the control panel from the tray icon, then add the rules you need:
 1. **Drive rule** (drive → folder) — pick a drive to recognise and its destination; choose whether to verify-then-wipe-and-eject after a successful copy, and optionally restrict it to certain extensions.
 2. **Folder rule** (folder → folder, or folder → Photos) — point a watched folder at a target folder or an Apple Photos album, filtered by extension.
 3. Leave it running. Trigger a run manually any time, and check the **activity log** for what happened.
+
+Dates come from the photo's EXIF capture time when it has one (JPEG, HEIF, and TIFF-based RAWs such as ARW, NEF, DNG, CR2), else from the file's modification time. Folder and filename templates take `{year}`, `{date}`, `{name}`, `{camera}`, and for filenames also `{time}`, `{orig}` and `{seq}`.
+
+Also in the panel: a backup destination per drive, RAW+JPEG pair handling, subfolder watching, run hours and battery pause, notification level, monthly stats (*Flow ▸ Stats*), and exporting or importing your rules (*Settings*).
 
 Settings live in a single config file, managed entirely from the UI — see [Files & locations](#files--locations).
 
@@ -173,6 +179,8 @@ it's inert for ad-hoc dev builds.
 |---|---|---|
 | **Config** | `~/Library/Application Support/com.guillaumelemer.fileflow/config.toml` | `%APPDATA%\com.guillaumelemer.fileflow\config.toml` |
 | **Logs** | `~/Library/Logs/com.guillaumelemer.fileflow/fileflow.log` | `%LOCALAPPDATA%\com.guillaumelemer.fileflow\logs\fileflow.log` |
+
+`runs.jsonl` (run history, behind *Flow ▸ History* and *Stats*) and `undo.json` (the last move per folder rule) sit beside the config.
 
 Both are managed from the UI — *Settings ▸ Open config folder* / *Open log file*;
 verbosity via *Settings ▸ Log level*.

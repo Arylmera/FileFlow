@@ -123,10 +123,14 @@ export function DestField({
   value,
   onChange,
   help,
+  label = "Destination",
+  placeholder = "~/Pictures/Imports",
 }: {
   value: string;
   onChange: (v: string) => void;
   help?: string;
+  label?: string;
+  placeholder?: string;
 }) {
   const [writable, setWritable] = useState<boolean | null>(null);
   useEffect(() => {
@@ -153,7 +157,7 @@ export function DestField({
 
   return (
     <Field
-      label="Destination"
+      label={label}
       badge={badge}
       help={
         help ??
@@ -162,7 +166,7 @@ export function DestField({
     >
       <div className="row">
         <input
-          placeholder="~/Pictures/Imports"
+          placeholder={placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
         />

@@ -120,7 +120,7 @@ export default function App() {
         )}
         {tab === "activity" && <ActivityView activity={activity} />}
         {tab === "settings" && (
-          <SettingsView config={config} patch={patchConfig} isMac={platform === "macos"} />
+          <SettingsView config={config} patch={patchConfig} isMac={platform === "macos"} dirty={dirty} />
         )}
       </main>
 

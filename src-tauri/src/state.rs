@@ -2,9 +2,10 @@
 //! durable run history that powers the Flow map.
 
 use fileflow_core::config::{CardRule, Config};
+use fileflow_core::folder::Moved;
 use fileflow_core::ingest::IngestReport;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,6 +36,33 @@ pub struct RunRecord {
     pub failed: usize,
     pub status: String,   // "ok" | "partial" | "failed"
     pub detail: String,
+    #[serde(default)]
+    pub bytes: u64,       // bytes written (copied/moved/imported)
+    #[serde(default)]
+    pub duration_ms: u64,
+    /// Per-file failures, `name: error`, capped (see `watchers::MAX_ERRORS`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+}
+
+/// Run totals for one calendar month (`YYYY-MM`), for the Stats view.
+#[derive(Clone, Default, Serialize)]
+pub struct MonthStats {
+    pub month: String,
+    pub runs: usize,
+    pub failed_runs: usize,
+    pub drives: usize, // drive imports
+    pub files: usize,
+    pub bytes: u64,
+    pub duration_ms: u64,
+}
+
+/// The last folder move per rule (so it can be undone) and the files an undo put back
+/// (so the watcher leaves them alone). Persisted beside the config as `undo.json`.
+#[derive(Default, Serialize, Deserialize)]
+pub struct UndoStore {
+    pub batches: HashMap<String, Vec<Moved>>, // rule_key -> last move
+    pub ignored: HashSet<PathBuf>,
 }
 
 /// A drive that imported cleanly and is waiting for the user to answer an "Ask first"
@@ -57,6 +85,11 @@ pub struct AppState {
     pub runs_path: PathBuf,
     /// When true, automatic (watcher-initiated) flows are skipped. Manual triggers ignore it.
     pub paused: AtomicBool,
+    /// An automatic run was held back by the schedule/battery rule; run everything once
+    /// the window opens.
+    pub deferred: AtomicBool,
+    pub undo: Mutex<UndoStore>,
+    pub undo_path: PathBuf,
 }
 
 impl AppState {
@@ -67,6 +100,11 @@ impl AppState {
             .unwrap_or_else(|| Path::new("."))
             .join("runs.jsonl");
         let runs = load_runs(&runs_path);
+        let undo_path = runs_path.with_file_name("undo.json");
+        let undo = std::fs::read(&undo_path)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
         AppState {
             config: Mutex::new(config),
             pending: Mutex::new(HashMap::new()),
@@ -75,7 +113,76 @@ impl AppState {
             runs: Mutex::new(runs),
             runs_path,
             paused: AtomicBool::new(false),
+            deferred: AtomicBool::new(false),
+            undo: Mutex::new(undo),
+            undo_path,
         }
+    }
+
+    fn save_undo(&self, store: &UndoStore) {
+        if let Ok(bytes) = serde_json::to_vec(store) {
+            if let Err(e) = std::fs::write(&self.undo_path, bytes) {
+                tracing::warn!("could not save undo state: {e}");
+            }
+        }
+    }
+
+    /// Remember a rule's latest move as the one "Undo" reverts (replacing the previous).
+    pub fn set_undo(&self, rule_key: &str, moves: Vec<Moved>) {
+        let mut u = self.undo.lock().unwrap();
+        u.batches.insert(rule_key.to_string(), moves);
+        self.save_undo(&u);
+    }
+
+    /// Take a rule's last move out of the store (it can be undone once).
+    pub fn take_undo(&self, rule_key: &str) -> Option<Vec<Moved>> {
+        let mut u = self.undo.lock().unwrap();
+        let moves = u.batches.remove(rule_key);
+        self.save_undo(&u);
+        moves
+    }
+
+    pub fn undo_keys(&self) -> Vec<String> {
+        self.undo.lock().unwrap().batches.keys().cloned().collect()
+    }
+
+    /// Paths the folder watcher must leave alone (files an undo put back).
+    pub fn ignored(&self) -> HashSet<PathBuf> {
+        self.undo.lock().unwrap().ignored.clone()
+    }
+
+    /// Add paths to the ignore set. Entries for files that have since gone (the user
+    /// moved or deleted them) are pruned first — before, not after, so paths an undo
+    /// is *about* to restore can be registered ahead of the files arriving.
+    pub fn add_ignored(&self, paths: impl IntoIterator<Item = PathBuf>) {
+        let mut u = self.undo.lock().unwrap();
+        u.ignored.retain(|p| p.exists());
+        u.ignored.extend(paths);
+        self.save_undo(&u);
+    }
+
+    /// Month-by-month totals over the *whole* run history file (not just the capped
+    /// in-memory window), newest month first.
+    pub fn stats(&self) -> Vec<MonthStats> {
+        let Ok(file) = std::fs::File::open(&self.runs_path) else {
+            return Vec::new();
+        };
+        let mut months: BTreeMap<String, MonthStats> = BTreeMap::new();
+        for r in std::io::BufReader::new(file)
+            .lines()
+            .map_while(Result::ok)
+            .filter_map(|l| serde_json::from_str::<RunRecord>(&l).ok())
+        {
+            let month = r.ts.get(..7).unwrap_or("").to_string();
+            let m = months.entry(month.clone()).or_insert_with(|| MonthStats { month, ..Default::default() });
+            m.runs += 1;
+            m.failed_runs += usize::from(r.status == "failed");
+            m.drives += usize::from(r.flow == "drive");
+            m.files += r.ok;
+            m.bytes += r.bytes;
+            m.duration_ms += r.duration_ms;
+        }
+        months.into_values().rev().collect()
     }
 
     pub fn is_paused(&self) -> bool {
@@ -164,6 +271,9 @@ mod tests {
             failed: 0,
             status: "ok".into(),
             detail: "moved".into(),
+            bytes: 10,
+            duration_ms: 5,
+            errors: vec![],
         }
     }
 
@@ -187,5 +297,31 @@ mod tests {
         assert_eq!(reloaded.len(), RUN_CAP);
         assert_eq!(reloaded.back().unwrap().ok, total - 1);
         assert_eq!(reloaded.front().unwrap().ok, total - RUN_CAP);
+
+        // Stats read the whole file, not the capped window.
+        let stats = state.stats();
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].month, "2026-06");
+        assert_eq!(stats[0].runs, total);
+        assert_eq!(stats[0].bytes, 10 * total as u64);
+    }
+
+    #[test]
+    fn undo_store_persists_and_prunes_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg_path = dir.path().join("config.toml");
+        let kept = dir.path().join("kept.jpg");
+        std::fs::write(&kept, b"x").unwrap();
+        let state = AppState::new(Config::default(), cfg_path.clone());
+        state.set_undo("folder:/w", vec![Moved { src: "/a".into(), dest: "/b".into() }]);
+        state.add_ignored([kept.clone(), dir.path().join("gone.jpg")]);
+
+        let reloaded = AppState::new(Config::default(), cfg_path);
+        assert_eq!(reloaded.undo_keys(), vec!["folder:/w".to_string()]);
+        assert_eq!(reloaded.ignored().len(), 2, "persisted, incl. a not-yet-restored path");
+        reloaded.add_ignored([]);
+        assert_eq!(reloaded.ignored(), HashSet::from([kept]), "vanished paths pruned on the next add");
+        assert!(reloaded.take_undo("folder:/w").is_some());
+        assert!(reloaded.take_undo("folder:/w").is_none(), "undo is one-shot");
     }
 }

@@ -56,6 +56,8 @@ pub fn run() {
             let show = MenuItem::with_id(app, "show", "Open FileFlow", true, None::<&str>)?;
             let pause =
                 MenuItem::with_id(app, "toggle_pause", "Pause / Resume watchers", true, None::<&str>)?;
+            let reveal_last =
+                MenuItem::with_id(app, "reveal_last", "Show last destination", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
             // Apple Photos only exists on macOS; don't offer the import elsewhere.
@@ -63,10 +65,10 @@ pub fn run() {
             let menu = {
                 let import_lr =
                     MenuItem::with_id(app, "import_lr", "Import to Photos now", true, None::<&str>)?;
-                Menu::with_items(app, &[&show, &import_lr, &pause, &sep, &quit])?
+                Menu::with_items(app, &[&show, &reveal_last, &import_lr, &pause, &sep, &quit])?
             };
             #[cfg(not(target_os = "macos"))]
-            let menu = Menu::with_items(app, &[&show, &pause, &sep, &quit])?;
+            let menu = Menu::with_items(app, &[&show, &reveal_last, &pause, &sep, &quit])?;
 
             TrayIconBuilder::with_id("main-tray")
                 .icon(tauri::include_image!("icons/tray.png"))
@@ -92,6 +94,20 @@ pub fn run() {
                         let now = !st.is_paused();
                         st.set_paused(now);
                         let _ = app.emit("paused-changed", now);
+                    }
+                    "reveal_last" => {
+                        // The newest run that put files in a real folder (Photos has none).
+                        let last = app
+                            .state::<state::AppState>()
+                            .recent_runs(500)
+                            .into_iter()
+                            .find(|r| r.ok > 0 && r.flow != "photos");
+                        match last {
+                            Some(r) => {
+                                let _ = commands::reveal_in_finder(r.dest);
+                            }
+                            None => show_main(app),
+                        }
                     }
                     "quit" => app.exit(0),
                     _ => {}
@@ -181,6 +197,12 @@ pub fn run() {
             commands::reveal_in_finder,
             commands::log_path,
             commands::get_platform,
+            commands::get_stats,
+            commands::undo_last,
+            commands::undo_keys,
+            commands::folder_watch_status,
+            commands::export_config,
+            commands::import_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

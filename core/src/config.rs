@@ -31,6 +31,10 @@ pub struct FolderRule {
     /// they pass `include`. Empty = nothing excluded.
     #[serde(default)]
     pub exclude: String,
+    /// Also handle files in subfolders of `watch` (the destination/archive folder is
+    /// always skipped, so a nested destination never re-triggers itself).
+    #[serde(default)]
+    pub recursive: bool,
     /// Destination. Flattened so `kind` and its fields sit at the rule's top level
     /// (e.g. `kind = "photos"` beside `album_mode`), keeping each rule to only the
     /// fields its kind actually uses.
@@ -120,6 +124,36 @@ pub struct CardRule {
     /// IPC layer reads, so TOML and JSON must agree on `routes`.)
     #[serde(default)]
     pub routes: Vec<Route>,
+    /// Optional second destination (3-2-1 backup): every file is also copied and
+    /// verified here, mirroring the folder structure. The drive is only erased once
+    /// *both* copies verified. Empty = no backup.
+    #[serde(default)]
+    pub backup_dest: String,
+    /// How RAW+JPEG pairs (same name, e.g. DSC0001.ARW + DSC0001.JPG) are handled.
+    #[serde(default)]
+    pub raw_jpeg: RawJpeg,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RawJpeg {
+    /// Treat every file on its own.
+    #[default]
+    Independent,
+    /// The JPEG follows its RAW's route and shares its `{seq}` number.
+    Together,
+    /// Don't copy a JPEG that has a RAW twin (it stays on the drive).
+    SkipJpeg,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NotifyLevel {
+    #[default]
+    All,
+    /// Only failures and things that need you (unreachable destination, permissions).
+    Errors,
+    Off,
 }
 
 /// One extension→destination route inside a [`CardRule`] (feature: split-by-extension).
@@ -205,6 +239,18 @@ pub struct AppSettings {
     pub show_tray_icon: bool,
     #[serde(default = "default_log_level")]
     pub log_level: String,
+    #[serde(default)]
+    pub notify: NotifyLevel,
+    /// Only start automatic runs between `run_from` and `run_until` (local `HH:MM`).
+    /// Both blank = any time. `run_from > run_until` spans midnight (e.g. 22:00–07:00).
+    /// Work that arrives outside the window runs when it opens.
+    #[serde(default)]
+    pub run_from: String,
+    #[serde(default)]
+    pub run_until: String,
+    /// Hold automatic runs while the computer is on battery.
+    #[serde(default)]
+    pub pause_on_battery: bool,
 }
 
 impl AppSettings {
@@ -226,6 +272,38 @@ impl Default for AppSettings {
             show_dock_icon: false,
             show_tray_icon: true,
             log_level: default_log_level(),
+            notify: NotifyLevel::All,
+            run_from: String::new(),
+            run_until: String::new(),
+            pause_on_battery: false,
+        }
+    }
+}
+
+/// Minutes since midnight for `HH:MM`; `None` when blank or malformed.
+fn hhmm(s: &str) -> Option<u32> {
+    let (h, m) = s.trim().split_once(':')?;
+    let (h, m): (u32, u32) = (h.parse().ok()?, m.parse().ok()?);
+    (h < 24 && m < 60).then_some(h * 60 + m)
+}
+
+impl AppSettings {
+    /// True if `now` (minutes since midnight) is inside the run window. An unset or
+    /// malformed window allows any time — a typo must never silently stop every flow.
+    pub fn in_run_window(&self, now: u32) -> bool {
+        match (hhmm(&self.run_from), hhmm(&self.run_until)) {
+            (Some(a), Some(b)) if a < b => (a..b).contains(&now),
+            (Some(a), Some(b)) if a > b => now >= a || now < b, // spans midnight
+            _ => true,
+        }
+    }
+
+    /// Reject a half-filled or malformed window at save time.
+    pub fn validate_window(&self) -> std::result::Result<(), String> {
+        match (self.run_from.trim().is_empty(), self.run_until.trim().is_empty()) {
+            (true, true) => Ok(()),
+            _ if hhmm(&self.run_from).is_some() && hhmm(&self.run_until).is_some() => Ok(()),
+            _ => Err("Schedule: enter both times as HH:MM, or leave both blank".into()),
         }
     }
 }
@@ -321,5 +399,18 @@ mod tests {
         let mut dock_only = AppSettings { show_dock_icon: true, show_tray_icon: false, ..Default::default() };
         dock_only.ensure_reachable();
         assert!(dock_only.show_dock_icon && !dock_only.show_tray_icon);
+    }
+
+    #[test]
+    fn run_window_handles_unset_daytime_and_midnight_spans() {
+        let w = |a: &str, b: &str| AppSettings { run_from: a.into(), run_until: b.into(), ..Default::default() };
+        assert!(w("", "").in_run_window(0), "unset = always");
+        assert!(w("9:00", "x").in_run_window(0), "malformed = always (and rejected at save)");
+        assert!(w("9:00", "x").validate_window().is_err());
+        assert!(w("", "").validate_window().is_ok());
+        let day = w("09:00", "17:30");
+        assert!(day.in_run_window(9 * 60) && !day.in_run_window(17 * 60 + 30) && !day.in_run_window(60));
+        let night = w("22:00", "07:00");
+        assert!(night.in_run_window(23 * 60) && night.in_run_window(60) && !night.in_run_window(12 * 60));
     }
 }
